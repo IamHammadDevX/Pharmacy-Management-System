@@ -1,0 +1,41 @@
+# Virtual environments
+venv/
+.env/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+
+# SQLite/Database files
+*.db
+*.sqlite3
+
+# Exported CSV or backup files
+*.csv
+*.bak
+
+# Log files
+*.log
+
+# PyInstaller/dist folders (if you ever package this)
+dist/
+build/
+*.spec
+
+# Test/coverage output
+htmlcov/
+.coverage
+
+# Jupyter Notebooks checkpoints
+.ipynb_checkpoints/
+*.sqbpro
