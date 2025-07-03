@@ -14,7 +14,7 @@ import csv
 class MainWindow(QMainWindow):
     def __init__(self, user):
         super().__init__()
-        self.user = user  # user dict with keys: id, username, role, full_name, email
+        self.user = user
         self.setWindowTitle("Pharmacy Management App")
         self.setGeometry(100, 100, 1200, 700)
 
@@ -23,7 +23,7 @@ class MainWindow(QMainWindow):
         main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.sidebar = Sidebar()  # You can pass user=self.user if your Sidebar accepts it
+        self.sidebar = Sidebar(user=self.user)
         main_layout.addWidget(self.sidebar)
 
         main_area = QWidget()
@@ -118,7 +118,6 @@ class MainWindow(QMainWindow):
 
         btn_layout.addStretch(1)
         area_layout.addLayout(btn_layout)
-        # --- End Buttons ---
 
         self.dashboard = Dashboard(user=self.user)
         area_layout.addWidget(self.dashboard, 1)
@@ -126,20 +125,20 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(main_area, 1)
         self.setCentralWidget(central)
 
-        # Connect add new product button to dialog
         self.topbar.add_product_clicked.connect(self.open_add_medicine_dialog)
+        self.topbar.logout_clicked.connect(self.handle_logout)
 
-        # Role-based UI control
         self.configure_role_access()
 
     def configure_role_access(self):
         if self.user["role"] == "user":
-            # Receptionist/User cannot add purchase, or export inventory
             self.new_purchase_btn.hide()
             self.export_inventory_btn.hide()
-        # Admin sees all
 
     def open_add_medicine_dialog(self):
+        if self.user["role"] != "admin":
+            QMessageBox.warning(self, "Permission Denied", "Only admin can add medicines.")
+            return
         dialog = AddMedicineDialog(self)
         if dialog.exec_() == dialog.Accepted:
             med = dialog.get_data()
@@ -159,6 +158,9 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Sale Error", f"An error occurred while processing the sale:\n{str(e)}")
 
     def open_purchase_dialog(self):
+        if self.user["role"] != "admin":
+            QMessageBox.warning(self, "Permission Denied", "Only admin can record purchases.")
+            return
         try:
             dlg = PurchaseDialog(self)
             if dlg.exec_():
@@ -167,6 +169,9 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Purchase Error", f"An error occurred while processing the purchase:\n{str(e)}")
 
     def export_inventory_csv(self):
+        if self.user["role"] != "admin":
+            QMessageBox.warning(self, "Permission Denied", "Only admin can export inventory data.")
+            return
         from db import get_inventory_data
         data = get_inventory_data()
         if not data:
@@ -203,3 +208,20 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Export Sales", f"Sales exported to {path}")
         except Exception as e:
             QMessageBox.critical(self, "Export Error", str(e))
+
+    def handle_logout(self):
+        # Only show login dialog if user chose "Switch Account"/logout,
+        # but if closed via X, just exit (no re-login dialog).
+        self.hide()
+        from widgets.login_dialog import LoginDialog
+        login = LoginDialog()
+        if login.exec_() == login.Accepted:
+            user = login.result
+            from ui.main_window import MainWindow
+            self.new_window = MainWindow(user)
+            self.new_window.show()
+        self.close()
+
+    def closeEvent(self, event):
+        # Just accept, no login dialog on app exit via X
+        event.accept()
