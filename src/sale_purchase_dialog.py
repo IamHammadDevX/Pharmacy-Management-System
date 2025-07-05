@@ -1,4 +1,6 @@
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QComboBox, QLineEdit, QPushButton, QMessageBox
+from PyQt5.QtWidgets import (
+    QDialog, QVBoxLayout, QLabel, QComboBox, QLineEdit, QPushButton, QMessageBox
+)
 import db
 
 class SaleDialog(QDialog):
@@ -15,12 +17,19 @@ class SaleDialog(QDialog):
         layout.addWidget(self.medicine_box)
 
         self.qty_edit = QLineEdit()
+        self.qty_edit.setPlaceholderText("e.g. 5")
         layout.addWidget(QLabel("Quantity:"))
         layout.addWidget(self.qty_edit)
 
-        self.cust_edit = QLineEdit()
+        # Use dropdown for customer selection (with editable field for new)
+        self.cust_box = QComboBox()
+        self.cust_box.setEditable(True)
+        self.cust_box.setInsertPolicy(QComboBox.NoInsert)
+        self.cust_box.addItem("")  # for optional
+        for cid, name, contact, address in db.get_customers():
+            self.cust_box.addItem(name, cid)
         layout.addWidget(QLabel("Customer (optional):"))
-        layout.addWidget(self.cust_edit)
+        layout.addWidget(self.cust_box)
 
         btn = QPushButton("Record Sale")
         btn.clicked.connect(self.save_sale)
@@ -33,9 +42,10 @@ class SaleDialog(QDialog):
         except ValueError:
             QMessageBox.warning(self, "Error", "Quantity must be a number.")
             return
-        cust = self.cust_edit.text()
+        cust = self.cust_box.currentText().strip()
+        customer = cust if cust else None
         try:
-            db.record_sale(med_id, qty, customer_name=cust)
+            db.record_sale(med_id, qty, customer=customer)
         except Exception as e:
             QMessageBox.warning(self, "Error", str(e))
             return
@@ -56,12 +66,19 @@ class PurchaseDialog(QDialog):
         layout.addWidget(self.medicine_box)
 
         self.qty_edit = QLineEdit()
+        self.qty_edit.setPlaceholderText("e.g. 10")
         layout.addWidget(QLabel("Quantity:"))
         layout.addWidget(self.qty_edit)
 
-        self.supp_edit = QLineEdit()
+        # Use dropdown for supplier selection (with editable field for new)
+        self.supp_box = QComboBox()
+        self.supp_box.setEditable(True)
+        self.supp_box.setInsertPolicy(QComboBox.NoInsert)
+        self.supp_box.addItem("")
+        for sid, name, contact, address in db.get_suppliers():
+            self.supp_box.addItem(name, sid)
         layout.addWidget(QLabel("Supplier (optional):"))
-        layout.addWidget(self.supp_edit)
+        layout.addWidget(self.supp_box)
 
         btn = QPushButton("Record Purchase")
         btn.clicked.connect(self.save_purchase)
@@ -74,9 +91,10 @@ class PurchaseDialog(QDialog):
         except ValueError:
             QMessageBox.warning(self, "Error", "Quantity must be a number.")
             return
-        supp = self.supp_edit.text()
+        supp = self.supp_box.currentText().strip()
+        supplier = supp if supp else None
         try:
-            db.record_purchase(med_id, qty, supplier_name=supp)
+            db.record_purchase(med_id, qty, supplier=supplier)
         except Exception as e:
             QMessageBox.warning(self, "Error", str(e))
             return

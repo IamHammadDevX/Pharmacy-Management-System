@@ -61,33 +61,36 @@ class LoginDialog(QDialog):
         layout.addWidget(self.login_btn)
 
         self.result = None
-
-        # Load users after login_btn is created for proper error handling
         self.load_users()
 
     def load_users(self):
+        """Load all users into the dropdown"""
         self.user_box.clear()
         try:
             users = get_user_list()
-            for user in users:
-                # user tuple: (username, full_name, role)
-                full_name = user[1] if user[1] else user[0]
-                role = user[2] if len(user) > 2 and user[2] else "user"
-                display = f"{full_name} ({role.capitalize()})"
-                self.user_box.addItem(display, user[0])
             if not users:
                 self.user_box.addItem("No users found", "")
                 self.login_btn.setEnabled(False)
+                return
+                
+            for username, full_name, role in users:
+                display_name = f"{full_name or username} ({role.capitalize()})"
+                self.user_box.addItem(display_name, username)
+                
         except Exception as e:
-            self.user_box.addItem("DB Error", "")
+            QMessageBox.critical(self, "Error", f"Failed to load users:\n{str(e)}")
+            self.user_box.addItem("Error loading users", "")
             self.login_btn.setEnabled(False)
 
     def handle_login(self):
+        """Handle login button click"""
         username = self.user_box.currentData()
         password = self.pass_edit.text()
+        
         if not username or not password:
             QMessageBox.warning(self, "Login Failed", "Please select user and enter password.")
             return
+            
         try:
             user = validate_login(username, password)
             if user:
@@ -96,4 +99,4 @@ class LoginDialog(QDialog):
             else:
                 QMessageBox.critical(self, "Login Failed", "Incorrect password. Please try again.")
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"An error occurred during login:\n{str(e)}")
+            QMessageBox.critical(self, "Error", f"Login error:\n{str(e)}")

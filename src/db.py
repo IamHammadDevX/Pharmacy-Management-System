@@ -102,20 +102,32 @@ def init_db():
         email TEXT
     )
     """)
-    # Add default admin if no users
+    
+    # Add default users if no users exist
     cursor.execute("SELECT COUNT(*) FROM users")
     if cursor.fetchone()[0] == 0:
-        default_admin_pw = "Admin@123"
-        pw_hash = hash_password(default_admin_pw)
-        cursor.execute("INSERT INTO users (username, password_hash, role, full_name, email) VALUES (?, ?, ?, ?, ?)",
-            ("admin", pw_hash, "admin", "Admin", "admin@pharmacy.local"))
+        # Add default admin
+        admin_pw = hash_password("Admin@123")
+        cursor.execute("""
+            INSERT INTO users (username, password_hash, role, full_name, email) 
+            VALUES (?, ?, ?, ?, ?)
+        """, ("admin", admin_pw, "admin", "Admin", "admin@pharmacy.local"))
+        
+        # Add default receptionist
+        recep_pw = hash_password("user123")
+        cursor.execute("""
+            INSERT INTO users (username, password_hash, role, full_name, email) 
+            VALUES (?, ?, ?, ?, ?)
+        """, ("recept1", recep_pw, "user", "Receptionist One", "recept1@pharmacy.local"))
+    
     conn.commit()
     conn.close()
 
 def reset_users_table():
-    # Drops and recreates the users table, then adds default admin and a default receptionist
+    """Drops and recreates the users table with default admin and receptionist"""
     conn = get_connection()
     cursor = conn.cursor()
+    
     cursor.execute("DROP TABLE IF EXISTS users")
     cursor.execute("""
     CREATE TABLE users (
@@ -127,33 +139,57 @@ def reset_users_table():
         email TEXT
     )
     """)
+    
     # Add default admin
     admin_pw = hash_password("Admin@123")
-    cursor.execute("INSERT INTO users (username, password_hash, role, full_name, email) VALUES (?, ?, ?, ?, ?)",
-        ("admin", admin_pw, "admin", "Admin", "admin@pharmacy.local"))
+    cursor.execute("""
+        INSERT INTO users (username, password_hash, role, full_name, email) 
+        VALUES (?, ?, ?, ?, ?)
+    """, ("admin", admin_pw, "admin", "Admin", "admin@pharmacy.local"))
+    
     # Add default receptionist
     recep_pw = hash_password("user123")
-    cursor.execute("INSERT INTO users (username, password_hash, role, full_name, email) VALUES (?, ?, ?, ?, ?)",
-        ("recept1", recep_pw, "user", "Receptionist One", "recept1@pharmacy.local"))
+    cursor.execute("""
+        INSERT INTO users (username, password_hash, role, full_name, email) 
+        VALUES (?, ?, ?, ?, ?)
+    """, ("recept1", recep_pw, "user", "Receptionist One", "recept1@pharmacy.local"))
+    
     conn.commit()
     conn.close()
 
 def get_user_list():
+    """Returns list of all users with username, full_name, and role"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT username, full_name, role FROM users ORDER BY role, username")
+    cursor.execute("""
+        SELECT username, full_name, role 
+        FROM users 
+        ORDER BY role, username
+    """)
     users = cursor.fetchall()
     conn.close()
     return users
 
 def validate_login(username, password):
+    """Validates user credentials and returns user data if successful"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, password_hash, role, full_name, email FROM users WHERE username=?", (username,))
+    cursor.execute("""
+        SELECT id, password_hash, role, full_name, email 
+        FROM users 
+        WHERE username=?
+    """, (username,))
     row = cursor.fetchone()
     conn.close()
+    
     if row and check_password(password, row[1]):
-        return {"id": row[0], "username": username, "role": row[2], "full_name": row[3], "email": row[4]}
+        return {
+            "id": row[0], 
+            "username": username, 
+            "role": row[2], 
+            "full_name": row[3], 
+            "email": row[4]
+        }
     return None
 
 def add_admin(username, password, full_name, email):
