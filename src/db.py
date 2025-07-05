@@ -2,6 +2,13 @@ import sqlite3
 from datetime import datetime
 import re
 import bcrypt
+from PyQt5.QtCore import QObject, pyqtSignal
+
+class DBSignals(QObject):
+    medicine_updated = pyqtSignal()
+    sale_recorded = pyqtSignal()
+
+db_signals = DBSignals()
 
 DB_FILE = "pharmacy.db"
 
@@ -41,7 +48,23 @@ def init_db():
         batch_no TEXT,
         expiry_date TEXT,
         quantity INTEGER NOT NULL,
-        unit_price REAL NOT NULL
+        unit_price REAL NOT NULL,
+        last_updated TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # --- Archived Medicines Table ---
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS archived_medicines (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        strength TEXT,
+        batch_no TEXT,
+        expiry_date TEXT,
+        quantity INTEGER DEFAULT 0,
+        unit_price REAL,
+        last_updated TEXT,
+        archive_date TEXT DEFAULT CURRENT_TIMESTAMP
     )
     """)
 
@@ -225,7 +248,7 @@ def add_receptionist(username, _password_ignore, full_name, email):
 
 # --- SUPPLIER & CUSTOMER MANAGEMENT ---
 
-def add_supplier(name, contact, address):
+def add_supplier(name, contact, address=""):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -260,7 +283,7 @@ def delete_supplier(supplier_id):
     conn.commit()
     conn.close()
 
-def add_customer(name, contact, address):
+def add_customer(name, contact, address=""):  # Make address optional
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -297,17 +320,25 @@ def delete_customer(customer_id):
 
 # --- MEDICINE MANAGEMENT ---
 def get_all_medicines():
+    """Returns only in-stock medicines (quantity > 0)"""
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, name, strength, batch_no, expiry_date, quantity, unit_price FROM medicines ORDER BY id DESC")
-    rows = cursor.fetchall()
-    conn.close()
-    return [
-        dict(zip(
-            ["id", "name", "strength", "batch_no", "expiry_date", "quantity", "unit_price"],
-            row
-        )) for row in rows
-    ]
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, name, strength, batch_no, expiry_date, quantity, unit_price 
+            FROM medicines 
+            WHERE quantity > 0
+            ORDER BY name
+        """)
+        rows = cursor.fetchall()
+        return [
+            dict(zip(
+                ["id", "name", "strength", "batch_no", "expiry_date", "quantity", "unit_price"],
+                row
+            )) for row in rows
+        ]
+    finally:
+        conn.close()
 
 def add_medicine(med):
     conn = get_connection()
@@ -343,9 +374,22 @@ def update_medicine(med_id, med):
 def delete_medicine(med_id):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM medicines WHERE id=?", (med_id,))
-    conn.commit()
-    conn.close()
+    try:
+        # Archive before deleting
+        cursor.execute("""
+            INSERT INTO archived_medicines 
+            (id, name, strength, batch_no, expiry_date, quantity, unit_price, last_updated)
+            SELECT id, name, strength, batch_no, expiry_date, quantity, unit_price, last_updated
+            FROM medicines WHERE id = ?
+        """, (med_id,))
+        
+        cursor.execute("DELETE FROM medicines WHERE id=?", (med_id,))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
 
 def batch_number_exists(name, batch_no, exclude_id=None):
     conn = get_connection()
@@ -364,42 +408,132 @@ def batch_number_exists(name, batch_no, exclude_id=None):
     conn.close()
     return bool(result)
 
+def check_and_remove_zero_stock():
+    """Remove medicines with zero quantity from database"""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        
+        # Get all medicines with zero quantity
+        cursor.execute("SELECT id, name FROM medicines WHERE quantity <= 0")
+        zero_stock_meds = cursor.fetchall()
+        
+        if zero_stock_meds:
+            # Archive before deleting
+            cursor.executemany("""
+                INSERT INTO archived_medicines 
+                (id, name, strength, batch_no, expiry_date, quantity, unit_price, last_updated)
+                SELECT id, name, strength, batch_no, expiry_date, quantity, unit_price, last_updated
+                FROM medicines WHERE id = ?
+            """, [(med[0],) for med in zero_stock_meds])
+            
+            # Delete from medicines table
+            cursor.executemany("DELETE FROM medicines WHERE id = ?", 
+                             [(med[0],) for med in zero_stock_meds])
+            
+            conn.commit()
+            return True, f"Removed {len(zero_stock_meds)} out-of-stock medicines"
+        return False, "No out-of-stock medicines found"
+    except Exception as e:
+        conn.rollback()
+        return False, str(e)
+    finally:
+        conn.close()
+
+def update_medicine_quantity(medicine_id, quantity_change):
+    """Update medicine quantity and remove if reaches 0"""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        
+        # Update quantity
+        cursor.execute("UPDATE medicines SET quantity = quantity + ? WHERE id = ?", 
+                      (quantity_change, medicine_id))
+        
+        # Check if quantity is now <= 0
+        cursor.execute("""
+            SELECT id, name, strength, batch_no, expiry_date, quantity, unit_price 
+            FROM medicines WHERE id = ?
+        """, (medicine_id,))
+        med_data = cursor.fetchone()
+        
+        if med_data and med_data[5] <= 0:  # quantity is at index 5
+            # Archive before deleting
+            cursor.execute("""
+                INSERT INTO archived_medicines 
+                (id, name, strength, batch_no, expiry_date, quantity, unit_price, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """, med_data)
+            
+            cursor.execute("DELETE FROM medicines WHERE id = ?", (medicine_id,))
+            message = f"Medicine '{med_data[1]}' removed due to zero stock"
+            db_signals.medicine_updated.emit()
+        else:
+            message = f"Quantity updated for medicine ID {medicine_id}"
+        
+        conn.commit()
+        return True, message
+    except Exception as e:
+        conn.rollback()
+        return False, str(e)
+    finally:
+        conn.close()
+
 # --- SALES & PURCHASES ---
 def record_sale(medicine_id, quantity, customer_id=None):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT quantity FROM medicines WHERE id=?", (medicine_id,))
-    row = cursor.fetchone()
-    if not row or row[0] < quantity:
+    try:
+        cursor.execute("SELECT quantity FROM medicines WHERE id=?", (medicine_id,))
+        row = cursor.fetchone()
+        if not row or row[0] < quantity:
+            raise ValueError("Not enough stock for this sale.")
+        
+        # Update quantity (will auto-remove if reaches 0)
+        success, message = update_medicine_quantity(medicine_id, -quantity)
+        if not success:
+            raise ValueError(message)
+        
+        cursor.execute("""
+            INSERT INTO sales (medicine_id, quantity, date, customer_id)
+            VALUES (?, ?, ?, ?)
+        """, (
+            medicine_id, quantity, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), customer_id
+        ))
+        conn.commit()
+        db_signals.sale_recorded.emit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
         conn.close()
-        raise ValueError("Not enough stock for this sale.")
-    cursor.execute("UPDATE medicines SET quantity=quantity-? WHERE id=?", (quantity, medicine_id))
-    cursor.execute("""
-        INSERT INTO sales (medicine_id, quantity, date, customer_id)
-        VALUES (?, ?, ?, ?)
-    """, (
-        medicine_id, quantity, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), customer_id
-    ))
-    conn.commit()
-    conn.close()
 
 def record_purchase(medicine_id, quantity, supplier_id=None):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT quantity FROM medicines WHERE id=?", (medicine_id,))
-    row = cursor.fetchone()
-    if not row:
+    try:
+        cursor.execute("SELECT 1 FROM medicines WHERE id=?", (medicine_id,))
+        if not cursor.fetchone():
+            raise ValueError("Medicine does not exist.")
+        
+        # Update quantity (will auto-remove if reaches 0)
+        success, message = update_medicine_quantity(medicine_id, quantity)
+        if not success:
+            raise ValueError(message)
+        
+        cursor.execute("""
+            INSERT INTO purchases (medicine_id, quantity, date, supplier_id)
+            VALUES (?, ?, ?, ?)
+        """, (
+            medicine_id, quantity, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), supplier_id
+        ))
+        conn.commit()
+        db_signals.medicine_updated.emit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
         conn.close()
-        raise ValueError("Medicine does not exist.")
-    cursor.execute("UPDATE medicines SET quantity=quantity+? WHERE id=?", (quantity, medicine_id))
-    cursor.execute("""
-        INSERT INTO purchases (medicine_id, quantity, date, supplier_id)
-        VALUES (?, ?, ?, ?)
-    """, (
-        medicine_id, quantity, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), supplier_id
-    ))
-    conn.commit()
-    conn.close()
 
 def get_sales_history():
     conn = get_connection()
@@ -443,7 +577,11 @@ def get_purchases_history():
 def get_inventory_data():
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT name, strength, batch_no, expiry_date, quantity, unit_price FROM medicines")
+    cursor.execute("""
+        SELECT name, strength, batch_no, expiry_date, quantity, unit_price 
+        FROM medicines 
+        WHERE quantity > 0
+    """)
     rows = cursor.fetchall()
     keys = ["name", "strength", "batch_no", "expiry_date", "quantity", "unit_price"]
     conn.close()
@@ -478,3 +616,74 @@ def get_purchases_data():
     rows = cursor.fetchall()
     conn.close()
     return [dict(zip(keys, row)) for row in rows]
+
+def get_archived_medicines():
+    """Get list of all archived medicines"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, name, strength, batch_no, expiry_date, quantity, unit_price, archive_date
+        FROM archived_medicines
+        ORDER BY archive_date DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        dict(zip(
+            ["id", "name", "strength", "batch_no", "expiry_date", "quantity", "unit_price", "archive_date"],
+            row
+        )) for row in rows
+    ]
+def record_sale_with_stock_update(medicine_id, quantity, customer_id=None):
+    """Atomically records sale and updates stock"""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        
+        # First verify stock
+        cursor.execute("SELECT quantity FROM medicines WHERE id=?", (medicine_id,))
+        row = cursor.fetchone()
+        if not row or row[0] < quantity:
+            return False, "Not enough stock for this sale"
+        
+        # Update stock
+        cursor.execute("UPDATE medicines SET quantity=quantity-? WHERE id=?", 
+                      (quantity, medicine_id))
+        
+        # Record sale
+        cursor.execute("""
+            INSERT INTO sales (medicine_id, quantity, date, customer_id)
+            VALUES (?, ?, datetime('now'), ?)
+        """, (medicine_id, quantity, customer_id))
+        
+        conn.commit()
+        return True, "Sale recorded successfully"
+    except Exception as e:
+        conn.rollback()
+        return False, str(e)
+    finally:
+        conn.close()
+
+def record_purchase_with_stock_update(medicine_id, quantity, unit_price, supplier_id=None):
+    """Atomically records purchase and updates stock"""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        
+        # Update stock
+        cursor.execute("UPDATE medicines SET quantity=quantity+?, unit_price=? WHERE id=?", 
+                      (quantity, unit_price, medicine_id))
+        
+        # Record purchase
+        cursor.execute("""
+            INSERT INTO purchases (medicine_id, quantity, date, supplier_id)
+            VALUES (?, ?, datetime('now'), ?)
+        """, (medicine_id, quantity, supplier_id))
+        
+        conn.commit()
+        return True, "Purchase recorded successfully"
+    except Exception as e:
+        conn.rollback()
+        return False, str(e)
+    finally:
+        conn.close()

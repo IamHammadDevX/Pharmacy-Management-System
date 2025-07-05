@@ -1,5 +1,6 @@
 from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QMessageBox, QSizePolicy, QFileDialog
+    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, 
+    QMessageBox, QSizePolicy, QFileDialog
 )
 from PyQt5.QtCore import Qt
 from sale_purchase_dialog import SaleDialog, PurchaseDialog
@@ -7,8 +8,7 @@ from widgets.sidebar import Sidebar
 from widgets.topbar import Topbar
 from ui.dashboard import Dashboard
 from widgets.add_medicine_dialog import AddMedicineDialog
-from db import add_medicine
-
+from db import add_medicine, db_signals
 import csv
 
 class MainWindow(QMainWindow):
@@ -17,6 +17,10 @@ class MainWindow(QMainWindow):
         self.user = user
         self.setWindowTitle("Pharmacy Management App")
         self.setGeometry(100, 100, 1200, 700)
+
+        # Connect DB signals
+        db_signals.sale_recorded.connect(self.refresh_all)
+        db_signals.medicine_updated.connect(self.refresh_all)
 
         # Central widget setup
         central = QWidget()
@@ -225,3 +229,21 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         # Just accept, no login dialog on app exit via X
         event.accept()
+    def refresh_all(self):
+        """Refresh all data views in the application"""
+        self.dashboard.load_table_data()
+    # Add this method to your main window class
+    def refresh_medicine_data(self):
+        """Refresh all medicine-related UI components"""
+        # Example for a QComboBox
+        self.ui.medicine_combo.clear()
+        medicines = db.get_all_medicines()  # This now only returns in-stock meds
+        for med in medicines:
+            self.ui.medicine_combo.addItem(
+                f"{med['name']} ({med['strength']}) - Stock: {med['quantity']}",
+                med['id']
+            )
+        
+        # Refresh any other medicine lists or tables
+        if hasattr(self, 'medicine_table'):
+            self.update_medicine_table()
