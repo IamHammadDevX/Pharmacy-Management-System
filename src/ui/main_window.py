@@ -3,8 +3,7 @@ from PyQt5.QtWidgets import (
     QMessageBox, QSizePolicy, QFileDialog
 )
 from PyQt5.QtCore import Qt
-from ui.sale_dialog import SaleDialog
-from ui.purchase_dialog import PurchaseDialog
+from sale_purchase_dialog import SaleDialog, PurchaseDialog
 from widgets.sidebar import Sidebar
 from widgets.topbar import Topbar
 from ui.dashboard import Dashboard
@@ -141,9 +140,6 @@ class MainWindow(QMainWindow):
         # Configure role-based access
         self.configure_role_access()
 
-        # Connect sidebar buttons to switch content (already handled in Sidebar)
-        # No need to duplicate connections here since Sidebar handles it
-
     def set_content(self, widget):
         """Replace the content area with a new widget"""
         if hasattr(self, 'content_area') and self.content_area:
@@ -179,7 +175,9 @@ class MainWindow(QMainWindow):
 
     def open_sale_dialog(self):
         try:
-            dlg = SaleDialog(self.user, self)
+            dlg = SaleDialog(parent=self)
+            if hasattr(dlg, 'user'):
+                dlg.user = self.user  # Pass user context if supported
             if dlg.exec_():
                 self.refresh_all()
         except Exception as e:
@@ -190,7 +188,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Permission Denied", "Only admin can record purchases.")
             return
         try:
-            dlg = PurchaseDialog(self.user, self)
+            dlg = PurchaseDialog(parent=self)
+            if hasattr(dlg, 'user'):
+                dlg.user = self.user  # Pass user context if supported
             if dlg.exec_():
                 self.refresh_all()
         except Exception as e:

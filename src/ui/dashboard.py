@@ -145,6 +145,7 @@ class Dashboard(QWidget):
 
         self.load_table_data()
 
+    # Replace load_table_data
     def load_table_data(self):
         self.medicines = get_all_medicines()
         today = datetime.now().strftime("%Y-%m-%d")

@@ -1,10 +1,9 @@
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLabel, QSizePolicy, QDialog
 from PyQt5.QtCore import Qt
+from sale_purchase_dialog import PurchaseDialog, SaleDialog
 from widgets.supplier_customer_management import SupplierCustomerManagement
 from widgets.invoice_dialog import InvoiceDialog
 from ui.dashboard import Dashboard
-from ui.purchase_dialog import PurchaseDialog
-from ui.sale_dialog import SaleDialog
 from ui.product_management import ProductManagement
 from ui.medicine_management import MedicineManagement
 from ui.orders_dialog import OrdersDialog
@@ -98,11 +97,11 @@ class Sidebar(QWidget):
             self.main_window.set_content(Dashboard(self.user, self.main_window))
 
     def open_purchase_dialog(self):
-        dlg = PurchaseDialog(self.user, parent=self.main_window)
+        dlg = PurchaseDialog(parent=self.main_window)
         dlg.exec_()
 
     def open_sale_dialog(self):
-        dlg = SaleDialog(self.user, parent=self.main_window)
+        dlg = SaleDialog(parent=self.main_window)
         dlg.exec_()
 
     def open_product_management(self):
