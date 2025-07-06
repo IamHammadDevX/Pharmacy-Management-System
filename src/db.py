@@ -1,3 +1,6 @@
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 import sqlite3
 from datetime import datetime
 import re
@@ -7,13 +10,18 @@ from PyQt5.QtCore import QObject, pyqtSignal
 class DBSignals(QObject):
     medicine_updated = pyqtSignal()
     sale_recorded = pyqtSignal()
+    order_updated = pyqtSignal()
 
 db_signals = DBSignals()
 
 DB_FILE = "pharmacy.db"
 
 def get_connection():
-    return sqlite3.connect(DB_FILE, check_same_thread=False)
+    # MODIFIED: Setting row_factory to sqlite3.Row for easier column access
+    # This is highly recommended for all your database interactions
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn.row_factory = sqlite3.Row # Enable dictionary-like access to rows
+    return conn
 
 # --- Password Policy Utils ---
 
@@ -126,6 +134,17 @@ def init_db():
     )
     """)
     
+    # --- Orders Table ---
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        medicine_name TEXT NOT NULL,
+        quantity_ordered INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('Pending', 'Approved', 'Rejected')),
+        order_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    
     # Add default users if no users exist
     cursor.execute("SELECT COUNT(*) FROM users")
     if cursor.fetchone()[0] == 0:
@@ -142,6 +161,16 @@ def init_db():
             INSERT INTO users (username, password_hash, role, full_name, email) 
             VALUES (?, ?, ?, ?, ?)
         """, ("recept1", recep_pw, "user", "Receptionist One", "recept1@pharmacy.local"))
+    
+    # Add sample orders if none exist
+    cursor.execute("SELECT COUNT(*) FROM orders")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+            INSERT INTO orders (medicine_name, quantity_ordered, status, order_date) VALUES
+            ('Aspirin', 50, 'Pending', '2025-07-07 12:00:00'),
+            ('Paracetamol', 30, 'Approved', '2025-07-06 14:00:00'),
+            ('Ibuprofen', 40, 'Rejected', '2025-07-05 09:00:00')
+        """)
     
     conn.commit()
     conn.close()
@@ -245,6 +274,25 @@ def add_receptionist(username, _password_ignore, full_name, email):
         raise ValueError("Username already exists")
     finally:
         conn.close()
+def update_user_password(user_id, new_password):
+    """
+    Updates a user's password in the database.
+    The new password will be hashed before storing.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        hashed_password = hash_password(new_password) # Use your existing hash_password function
+        
+        cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hashed_password, user_id))
+        conn.commit()
+        if cursor.rowcount == 0:
+            raise ValueError(f"User with ID {user_id} not found.")
+    except sqlite3.Error as e:
+        conn.rollback()
+        raise Exception(f"Database error updating password: {str(e)}")
+    finally:
+        conn.close()
 
 # --- SUPPLIER & CUSTOMER MANAGEMENT ---
 
@@ -282,6 +330,7 @@ def delete_supplier(supplier_id):
     cursor.execute("DELETE FROM suppliers WHERE id=?", (supplier_id,))
     conn.commit()
     conn.close()
+    db_signals.medicine_updated.emit() # Assuming this signal is relevant for supplier changes as well
 
 def add_customer(name, contact, address=""):  # Make address optional
     conn = get_connection()
@@ -331,12 +380,8 @@ def get_all_medicines():
             ORDER BY name
         """)
         rows = cursor.fetchall()
-        return [
-            dict(zip(
-                ["id", "name", "strength", "batch_no", "expiry_date", "quantity", "unit_price"],
-                row
-            )) for row in rows
-        ]
+        # Rows are already sqlite3.Row objects (dictionary-like) due to get_connection()
+        return [dict(row) for row in rows]
     finally:
         conn.close()
 
@@ -372,24 +417,19 @@ def update_medicine(med_id, med):
     conn.close()
 
 def delete_medicine(med_id):
-    conn = get_connection()
-    cursor = conn.cursor()
+    """Delete a medicine by ID from the database"""
     try:
-        # Archive before deleting
-        cursor.execute("""
-            INSERT INTO archived_medicines 
-            (id, name, strength, batch_no, expiry_date, quantity, unit_price, last_updated)
-            SELECT id, name, strength, batch_no, expiry_date, quantity, unit_price, last_updated
-            FROM medicines WHERE id = ?
-        """, (med_id,))
-        
-        cursor.execute("DELETE FROM medicines WHERE id=?", (med_id,))
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM medicines WHERE id = ?", (med_id,))
         conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
+        if cursor.rowcount == 0:
+            raise ValueError("No medicine found with the given ID.")
+    except sqlite3.Error as e:
+        raise Exception(f"Database error: {str(e)}")
     finally:
         conn.close()
+        db_signals.medicine_updated.emit()  # Signal update after deletion
 
 def batch_number_exists(name, batch_no, exclude_id=None):
     conn = get_connection()
@@ -420,16 +460,17 @@ def check_and_remove_zero_stock():
         
         if zero_stock_meds:
             # Archive before deleting
+            # Ensure the order of columns matches the INSERT statement
             cursor.executemany("""
                 INSERT INTO archived_medicines 
                 (id, name, strength, batch_no, expiry_date, quantity, unit_price, last_updated)
                 SELECT id, name, strength, batch_no, expiry_date, quantity, unit_price, last_updated
                 FROM medicines WHERE id = ?
-            """, [(med[0],) for med in zero_stock_meds])
+            """, [(med["id"],) for med in zero_stock_meds]) # Access by key due to row_factory
             
             # Delete from medicines table
             cursor.executemany("DELETE FROM medicines WHERE id = ?", 
-                             [(med[0],) for med in zero_stock_meds])
+                             [(med["id"],) for med in zero_stock_meds]) # Access by key
             
             conn.commit()
             return True, f"Removed {len(zero_stock_meds)} out-of-stock medicines"
@@ -455,18 +496,19 @@ def update_medicine_quantity(medicine_id, quantity_change):
             SELECT id, name, strength, batch_no, expiry_date, quantity, unit_price 
             FROM medicines WHERE id = ?
         """, (medicine_id,))
-        med_data = cursor.fetchone()
+        med_data = cursor.fetchone() # This is now a sqlite3.Row object
         
-        if med_data and med_data[5] <= 0:  # quantity is at index 5
+        if med_data and med_data["quantity"] <= 0:  # Access by key
             # Archive before deleting
             cursor.execute("""
                 INSERT INTO archived_medicines 
                 (id, name, strength, batch_no, expiry_date, quantity, unit_price, last_updated)
                 VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-            """, med_data)
+            """, (med_data["id"], med_data["name"], med_data["strength"], med_data["batch_no"],
+                  med_data["expiry_date"], med_data["quantity"], med_data["unit_price"]))
             
             cursor.execute("DELETE FROM medicines WHERE id = ?", (medicine_id,))
-            message = f"Medicine '{med_data[1]}' removed due to zero stock"
+            message = f"Medicine '{med_data['name']}' removed due to zero stock"
             db_signals.medicine_updated.emit()
         else:
             message = f"Quantity updated for medicine ID {medicine_id}"
@@ -486,7 +528,7 @@ def record_sale(medicine_id, quantity, customer_id=None):
     try:
         cursor.execute("SELECT quantity FROM medicines WHERE id=?", (medicine_id,))
         row = cursor.fetchone()
-        if not row or row[0] < quantity:
+        if not row or row["quantity"] < quantity: # Access by key
             raise ValueError("Not enough stock for this sale.")
         
         # Update quantity (will auto-remove if reaches 0)
@@ -508,7 +550,7 @@ def record_sale(medicine_id, quantity, customer_id=None):
     finally:
         conn.close()
 
-def record_purchase(medicine_id, quantity, supplier_id=None):
+def record_purchase(medicine_id, quantity, supplier_id=None): # Removed unit_price as it's not in your sales table
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -539,7 +581,7 @@ def get_sales_history():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT s.id, m.name, s.quantity, s.date, c.name
+        SELECT s.id, m.name AS medicine_name, s.quantity, s.date, c.name AS customer_name
         FROM sales s
         JOIN medicines m ON s.medicine_id = m.id
         LEFT JOIN customers c ON s.customer_id = c.id
@@ -547,18 +589,13 @@ def get_sales_history():
     """)
     rows = cursor.fetchall()
     conn.close()
-    return [
-        dict(zip(
-            ["id", "medicine_name", "quantity", "date", "customer_name"],
-            row
-        )) for row in rows
-    ]
+    return [dict(row) for row in rows]
 
 def get_purchases_history():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT p.id, m.name, p.quantity, p.date, s.name
+        SELECT p.id, m.name AS medicine_name, p.quantity, p.date, s.name AS supplier_name
         FROM purchases p
         JOIN medicines m ON p.medicine_id = m.id
         LEFT JOIN suppliers s ON p.supplier_id = s.id
@@ -566,12 +603,7 @@ def get_purchases_history():
     """)
     rows = cursor.fetchall()
     conn.close()
-    return [
-        dict(zip(
-            ["id", "medicine_name", "quantity", "date", "supplier_name"],
-            row
-        )) for row in rows
-    ]
+    return [dict(row) for row in rows]
 
 # --- EXPORT HELPERS ---
 def get_inventory_data():
@@ -583,39 +615,36 @@ def get_inventory_data():
         WHERE quantity > 0
     """)
     rows = cursor.fetchall()
-    keys = ["name", "strength", "batch_no", "expiry_date", "quantity", "unit_price"]
     conn.close()
-    return [dict(zip(keys, row)) for row in rows]
+    return [dict(row) for row in rows]
 
 def get_sales_data():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT s.id, m.name, s.quantity, c.name, s.date
+        SELECT s.id AS sale_id, m.name AS medicine, s.quantity, c.name AS customer, s.date
         FROM sales s
         JOIN medicines m ON s.medicine_id = m.id
         LEFT JOIN customers c ON s.customer_id = c.id
         ORDER BY s.date DESC
     """)
-    keys = ["sale_id", "medicine", "quantity", "customer", "date"]
     rows = cursor.fetchall()
     conn.close()
-    return [dict(zip(keys, row)) for row in rows]
+    return [dict(row) for row in rows]
 
 def get_purchases_data():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT p.id, m.name, p.quantity, s.name, p.date
+        SELECT p.id AS purchase_id, m.name AS medicine, p.quantity, s.name AS supplier, p.date
         FROM purchases p
         JOIN medicines m ON p.medicine_id = m.id
         LEFT JOIN suppliers s ON p.supplier_id = s.id
         ORDER BY p.date DESC
     """)
-    keys = ["purchase_id", "medicine", "quantity", "supplier", "date"]
     rows = cursor.fetchall()
     conn.close()
-    return [dict(zip(keys, row)) for row in rows]
+    return [dict(row) for row in rows]
 
 def get_archived_medicines():
     """Get list of all archived medicines"""
@@ -628,12 +657,8 @@ def get_archived_medicines():
     """)
     rows = cursor.fetchall()
     conn.close()
-    return [
-        dict(zip(
-            ["id", "name", "strength", "batch_no", "expiry_date", "quantity", "unit_price", "archive_date"],
-            row
-        )) for row in rows
-    ]
+    return [dict(row) for row in rows]
+
 def record_sale_with_stock_update(medicine_id, quantity, customer_id=None):
     """Atomically records sale and updates stock"""
     conn = get_connection()
@@ -643,7 +668,7 @@ def record_sale_with_stock_update(medicine_id, quantity, customer_id=None):
         # First verify stock
         cursor.execute("SELECT quantity FROM medicines WHERE id=?", (medicine_id,))
         row = cursor.fetchone()
-        if not row or row[0] < quantity:
+        if not row or row["quantity"] < quantity: # Access by key
             return False, "Not enough stock for this sale"
         
         # Update stock
@@ -687,3 +712,131 @@ def record_purchase_with_stock_update(medicine_id, quantity, unit_price, supplie
         return False, str(e)
     finally:
         conn.close()
+
+# --- ORDER MANAGEMENT ---
+def get_all_orders():
+    """Retrieve all orders from the database"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, medicine_name, quantity_ordered, status, order_date FROM orders")
+        orders = [dict(row) for row in cursor.fetchall()] # Convert to dicts
+        return orders
+    except sqlite3.Error as e:
+        raise Exception(f"Database error: {str(e)}")
+    finally:
+        conn.close()
+
+def insert_order(medicine_name, quantity_ordered):
+    """Insert a new order into the database"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO orders (medicine_name, quantity_ordered, status, order_date)
+            VALUES (?, ?, ?, ?)
+        """, (medicine_name, quantity_ordered, "Pending", datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        conn.commit()
+        return cursor.lastrowid
+    except sqlite3.Error as e:
+        conn.rollback()
+        raise Exception(f"Database error: {str(e)}")
+    finally:
+        conn.close()
+        db_signals.order_updated.emit()
+
+def update_order_status(order_id, status):
+    """Update the status of an order"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE orders SET status = ? WHERE id = ?", (status, order_id))
+        conn.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("No order found with the given ID.")
+    except sqlite3.Error as e:
+        raise Exception(f"Database error: {str(e)}")
+    finally:
+        conn.close()
+        db_signals.order_updated.emit()
+
+# --- NEW: SALES REPORT FUNCTION ---
+def get_sales_report_data(start_date=None, end_date=None):
+    """
+    Retrieves sales report data from the database, aggregating by medicine.
+    Only considers 'Approved' orders.
+    Optionally filters by order date.
+
+    Args:
+        start_date (str, optional): Start date in 'YYYY-MM-DD' format.
+        end_date (str, optional): End date in 'YYYY-MM-DD' format.
+
+    Returns:
+        tuple: A tuple containing:
+            - summary_data (dict): {'total_orders': int, 'total_quantity_sold': int}
+            - sales_by_medicine_list (list): [{'medicine_name': str, 'total_quantity_sold': int, 'num_orders': int}, ...]
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # Build the WHERE clause for date filtering
+        date_filter_sql = ""
+        params = []
+        if start_date:
+            date_filter_sql += " AND date >= ?" # Using 'date' column from sales table
+            params.append(start_date + " 00:00:00") # Include start of day
+        if end_date:
+            date_filter_sql += " AND date <= ?"   # Using 'date' column from sales table
+            params.append(end_date + " 23:59:59") # Include end of day
+
+        # Query for sales by medicine
+        # Joining with medicines table to get medicine_name
+        cursor.execute(f"""
+            SELECT
+                m.name AS medicine_name,
+                SUM(s.quantity) AS total_quantity_sold,
+                COUNT(s.id) AS num_orders
+            FROM
+                sales s
+            JOIN
+                medicines m ON s.medicine_id = m.id
+            WHERE
+                1=1 {date_filter_sql} -- 1=1 is a trick to easily append AND clauses
+            GROUP BY
+                m.name
+            ORDER BY
+                total_quantity_sold DESC
+        """, params)
+        sales_by_medicine = [
+            {
+                "medicine_name": row["medicine_name"],
+                "total_quantity_sold": row["total_quantity_sold"],
+                "num_orders": row["num_orders"]
+            } for row in cursor.fetchall()
+        ]
+
+        # Query for overall summary
+        cursor.execute(f"""
+            SELECT
+                COUNT(id) AS total_orders,
+                SUM(quantity) AS total_quantity_sold
+            FROM
+                sales
+            WHERE
+                1=1 {date_filter_sql}
+        """, params)
+        summary_row = cursor.fetchone()
+        summary_data = {
+            "total_orders": summary_row["total_orders"] if summary_row and summary_row["total_orders"] is not None else 0,
+            "total_quantity_sold": summary_row["total_quantity_sold"] if summary_row and summary_row["total_quantity_sold"] is not None else 0
+        }
+
+        return summary_data, sales_by_medicine
+
+    except sqlite3.Error as e:
+        raise Exception(f"Database error fetching sales report: {str(e)}")
+    finally:
+        if conn:
+            conn.close()

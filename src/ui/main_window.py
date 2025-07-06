@@ -7,8 +7,16 @@ from sale_purchase_dialog import SaleDialog, PurchaseDialog
 from widgets.sidebar import Sidebar
 from widgets.topbar import Topbar
 from ui.dashboard import Dashboard
+from ui.medicine_management import MedicineManagement
+from ui.orders_dialog import OrdersDialog
+from ui.sales_report import SalesDialog
 from widgets.add_medicine_dialog import AddMedicineDialog
-from db import add_medicine, db_signals, get_all_medicines
+
+# Import the newly created dialogs
+from ui.help_support import HelpSupportDialog # New import
+from ui.settings_dialog import SettingsDialog     # New import
+
+from db import add_medicine, db_signals, get_all_medicines, get_inventory_data, get_sales_data, get_all_orders, update_order_status
 import csv
 
 class MainWindow(QMainWindow):
@@ -21,6 +29,7 @@ class MainWindow(QMainWindow):
         # Connect DB signals
         db_signals.sale_recorded.connect(self.refresh_all)
         db_signals.medicine_updated.connect(self.refresh_all)
+        db_signals.order_updated.connect(self.refresh_all)
 
         # Central widget setup
         central = QWidget()
@@ -29,6 +38,9 @@ class MainWindow(QMainWindow):
 
         # Sidebar
         self.sidebar = Sidebar(user=self.user, parent=self)
+        # No direct signal connections here from sidebar, as sidebar handles its own button clicks
+        # and calls methods like open_sales_report directly.
+
         self.main_layout.addWidget(self.sidebar)
 
         # Main area
@@ -40,7 +52,7 @@ class MainWindow(QMainWindow):
         self.topbar = Topbar(user=self.user)
         self.area_layout.addWidget(self.topbar)
 
-        # Buttons Layout
+        # Buttons Layout (existing buttons)
         btn_layout = QHBoxLayout()
         btn_layout.setContentsMargins(12, 6, 12, 6)
         btn_layout.addStretch(1)
@@ -154,11 +166,9 @@ class MainWindow(QMainWindow):
         if self.user["role"] == "user":
             self.new_purchase_btn.hide()
             self.export_inventory_btn.hide()
-            # Hide admin-only sidebar buttons
-            for text, btn in self.sidebar.sidebar_buttons.items():
-                if any(text in item for item in [("Purchase", True), ("Product", True), ("Medicine", True),
-                                               ("Orders", True), ("Sales Report", True), ("Settings", True)]):
-                    btn.hide()
+            # The sidebar's configure_role_access should handle its own button visibility.
+            # No need to hide sidebar buttons from here if Sidebar class already does it.
+            pass
 
     def open_add_medicine_dialog(self):
         if self.user["role"] != "admin":
@@ -218,7 +228,11 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Export Error", str(e))
 
     def export_sales_csv(self):
-        from db import get_sales_data
+        # This export is for the general sales history, not the detailed report
+        if self.user["role"] != "admin":
+            QMessageBox.warning(self, "Permission Denied", "Only admin can export sales data.")
+            return
+        from db import get_sales_data # This is the general sales history function
         try:
             data = get_sales_data()
             if not data:
@@ -255,9 +269,16 @@ class MainWindow(QMainWindow):
             self.content_area.load_table_data()
         if hasattr(self, 'content_area') and hasattr(self.content_area, 'load_dashboard_data'):
             self.content_area.load_dashboard_data()
-        # Add calls to refresh other views as they become active
-        # e.g., self.products_view.load_data()
-        #        self.sales_report_view.load_data()
+        # Refresh MedicineManagement if open
+        if isinstance(self.content_area, MedicineManagement):
+            self.content_area.load_medicines()
+        # Refresh OrdersDialog if open
+        if isinstance(self.content_area, OrdersDialog):
+            self.content_area.load_orders()
+        # Refresh SalesDialog if open
+        if isinstance(self.content_area, SalesDialog):
+            self.content_area.load_sales_data()
+
 
     def refresh_medicine_data(self):
         """Refresh all medicine-related UI components"""
@@ -272,6 +293,46 @@ class MainWindow(QMainWindow):
                     f"{med['name']} ({med['strength']}) - Stock: {med['quantity']}",
                     med['id']
                 )
+        # Refresh MedicineManagement if open
+        if isinstance(self.content_area, MedicineManagement):
+            self.content_area.load_medicines()
         # Refresh any other medicine lists or tables if implemented
         if hasattr(self.content_area) and hasattr(self.content_area, 'update_medicine_table'):
             self.content_area.update_medicine_table()
+
+    def open_medicine_management(self):
+        """Open Medicine Inventory Management dialog"""
+        if self.user["role"] != "admin":
+            QMessageBox.warning(self, "Permission Denied", "Only admin can manage medicine inventory.")
+            return
+        dialog = MedicineManagement(self.user, self)
+        dialog.exec_()
+        
+    def open_orders_dialog(self):
+        """Open Orders Management dialog"""
+        if self.user["role"] != "admin":
+            QMessageBox.warning(self, "Permission Denied", "Only admin can manage orders.")
+            return
+        dialog = OrdersDialog(self.user, self)
+        dialog.exec_()
+
+    def open_sales_report(self):
+        """Open Sales Report dialog."""
+        if self.user["role"] != "admin":
+            QMessageBox.warning(self, "Permission Denied", "Only admin can view sales reports.")
+            return
+        dialog = SalesDialog(user=self.user, parent=self)
+        dialog.exec_()
+    
+    # New methods for Help & Support and Settings
+    def open_help_support(self):
+        """Open Help & Support dialog."""
+        # No role check needed for help
+        dialog = HelpSupportDialog(user=self.user, parent=self)
+        dialog.exec_()
+
+    def open_settings_dialog(self):
+        """Open Settings dialog."""
+        # No role check needed here, as the dialog itself will handle user context
+        dialog = SettingsDialog(user=self.user, parent=self)
+        dialog.exec_()

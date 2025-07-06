@@ -7,8 +7,8 @@ from ui.dashboard import Dashboard
 from ui.product_management import ProductManagement
 from ui.medicine_management import MedicineManagement
 from ui.orders_dialog import OrdersDialog
-from ui.sales_report import SalesReport
-from ui.help_support import HelpSupport
+from ui.sales_report import SalesDialog
+from ui.help_support import HelpSupportDialog
 from ui.settings_dialog import SettingsDialog
 
 class Sidebar(QWidget):
@@ -125,11 +125,11 @@ class Sidebar(QWidget):
         dlg.exec_()
 
     def open_sales_report(self):
-        dlg = SalesReport(self.user, parent=self.main_window)
+        dlg = SalesDialog(self.user, parent=self.main_window)
         dlg.exec_()
 
     def open_help_support(self):
-        dlg = HelpSupport(self.user, parent=self.main_window)
+        dlg = HelpSupportDialog(self.user, parent=self.main_window)
         dlg.exec_()
 
     def open_settings_dialog(self):
