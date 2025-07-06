@@ -351,7 +351,7 @@ def add_medicine(med):
     ))
     conn.commit()
     conn.close()
-
+    
 def update_medicine(med_id, med):
     conn = get_connection()
     cursor = conn.cursor()

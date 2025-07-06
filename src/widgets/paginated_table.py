@@ -36,61 +36,74 @@ class PaginatedTable(QWidget):
         layout.addLayout(pagination)
 
     def set_data(self, medicines):
+        if not medicines:
+            print("No medicines data to display")
+            self.table.setRowCount(0)
+            return
+
+        self.table.setRowCount(0)  # Clear existing rows
         self.table.setRowCount(len(medicines))
+
         for row, med in enumerate(medicines):
-            # --- Set Items ---
-            self.table.setItem(row, 0, QTableWidgetItem(med.get("name", "")))
-            self.table.setItem(row, 1, QTableWidgetItem(med.get("strength", "")))
-            self.table.setItem(row, 2, QTableWidgetItem(med.get("batch_no", "")))
-            self.table.setItem(row, 3, QTableWidgetItem(med.get("expiry_date", "")))
-            self.table.setItem(row, 4, QTableWidgetItem(str(med.get("quantity", ""))))
-            self.table.setItem(row, 5, QTableWidgetItem(str(med.get("unit_price", ""))))
-
-            # --- Highlighting Logic ---
-            low_stock = False
-            expiry_soon = False
             try:
-                low_stock = int(med.get("quantity", 0)) < 10
-            except Exception:
-                pass
-            expiry_str = med.get("expiry_date", "")
-            if expiry_str:
-                from datetime import datetime, timedelta
+                # --- Set Items ---
+                self.table.setItem(row, 0, QTableWidgetItem(str(med.get("name", ""))))
+                self.table.setItem(row, 1, QTableWidgetItem(str(med.get("strength", ""))))
+                self.table.setItem(row, 2, QTableWidgetItem(str(med.get("batch_no", ""))))
+                self.table.setItem(row, 3, QTableWidgetItem(str(med.get("expiry_date", ""))))
+                self.table.setItem(row, 4, QTableWidgetItem(str(med.get("quantity", ""))))
+                self.table.setItem(row, 5, QTableWidgetItem(str(med.get("unit_price", ""))))
+
+                # --- Highlighting Logic ---
+                low_stock = False
+                expiry_soon = False
                 try:
-                    expiry_date = datetime.strptime(expiry_str, "%Y-%m-%d")
-                    today = datetime.today()
-                    if expiry_date > today and (expiry_date - today).days <= 30:
-                        expiry_soon = True
-                except Exception:
-                    pass
-            for col in range(6):  # Only color data columns, not actions
-                item = self.table.item(row, col)
-                if not item:
-                    continue
-                if low_stock and expiry_soon:
-                    item.setBackground(QColor("#ffcccc"))  # Light red for both
-                elif low_stock:
-                    item.setBackground(QColor("#fff7e6"))  # Light orange for low stock
-                elif expiry_soon:
-                    item.setBackground(QColor("#e6f7ff"))  # Light blue for expiry soon
-                else:
-                    item.setBackground(QColor("white"))
+                    quantity = int(med.get("quantity", 0))
+                    low_stock = quantity < 10
+                except (ValueError, TypeError):
+                    print(f"Invalid quantity for medicine {med.get('name', 'Unknown')}: {med.get('quantity')}")
+                
+                expiry_str = med.get("expiry_date", "")
+                if expiry_str:
+                    from datetime import datetime, timedelta
+                    try:
+                        expiry_date = datetime.strptime(expiry_str, "%Y-%m-%d")
+                        today = datetime.today()
+                        if expiry_date > today and (expiry_date - today).days <= 30:
+                            expiry_soon = True
+                    except (ValueError, TypeError):
+                        print(f"Invalid expiry date for medicine {med.get('name', 'Unknown')}: {expiry_str}")
 
-            # --- Actions: Edit and Delete buttons ---
-            action_widget = QWidget()
-            actions = QHBoxLayout(action_widget)
-            actions.setContentsMargins(0, 0, 0, 0)
-            edit_btn = QPushButton("Edit")
-            edit_btn.setStyleSheet("background:#36b37e; color:white;")
-            delete_btn = QPushButton("Delete")
-            delete_btn.setStyleSheet("background:#ff5630; color:white;")
+                for col in range(6):  # Only color data columns, not actions
+                    item = self.table.item(row, col)
+                    if not item:
+                        continue
+                    if low_stock and expiry_soon:
+                        item.setBackground(QColor("#ffcccc"))  # Light red for both
+                    elif low_stock:
+                        item.setBackground(QColor("#fff7e6"))  # Light orange for low stock
+                    elif expiry_soon:
+                        item.setBackground(QColor("#e6f7ff"))  # Light blue for expiry soon
+                    else:
+                        item.setBackground(QColor("white"))
 
-            # Use default arguments in lambda to avoid late binding bug!
-            edit_btn.clicked.connect(lambda _, m=med: self.edit_requested.emit(m))
-            delete_btn.clicked.connect(lambda _, id=med["id"]: self.delete_requested.emit(id))
+                # --- Actions: Edit and Delete buttons ---
+                action_widget = QWidget()
+                actions = QHBoxLayout(action_widget)
+                actions.setContentsMargins(0, 0, 0, 0)
+                edit_btn = QPushButton("Edit")
+                edit_btn.setStyleSheet("background:#36b37e; color:white;")
+                delete_btn = QPushButton("Delete")
+                delete_btn.setStyleSheet("background:#ff5630; color:white;")
 
-            actions.addWidget(edit_btn)
-            actions.addWidget(delete_btn)
-            actions.addStretch()
-            action_widget.setLayout(actions)
-            self.table.setCellWidget(row, 6, action_widget)
+                # Use default arguments in lambda to avoid late binding bug!
+                edit_btn.clicked.connect(lambda _, m=med: self.edit_requested.emit(m))
+                delete_btn.clicked.connect(lambda _, id=med.get("id", -1): self.delete_requested.emit(id))
+
+                actions.addWidget(edit_btn)
+                actions.addWidget(delete_btn)
+                actions.addStretch()
+                action_widget.setLayout(actions)
+                self.table.setCellWidget(row, 6, action_widget)
+            except Exception as e:
+                print(f"Error processing row {row} for medicine {med.get('name', 'Unknown')}: {str(e)}")

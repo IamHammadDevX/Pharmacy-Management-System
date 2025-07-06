@@ -3,12 +3,13 @@ from PyQt5.QtWidgets import (
     QMessageBox, QSizePolicy, QFileDialog
 )
 from PyQt5.QtCore import Qt
-from sale_purchase_dialog import SaleDialog, PurchaseDialog
+from ui.sale_dialog import SaleDialog
+from ui.purchase_dialog import PurchaseDialog
 from widgets.sidebar import Sidebar
 from widgets.topbar import Topbar
 from ui.dashboard import Dashboard
 from widgets.add_medicine_dialog import AddMedicineDialog
-from db import add_medicine, db_signals
+from db import add_medicine, db_signals, get_all_medicines
 import csv
 
 class MainWindow(QMainWindow):
@@ -24,20 +25,23 @@ class MainWindow(QMainWindow):
 
         # Central widget setup
         central = QWidget()
-        main_layout = QHBoxLayout(central)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout = QHBoxLayout(central)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.sidebar = Sidebar(user=self.user)
-        main_layout.addWidget(self.sidebar)
+        # Sidebar
+        self.sidebar = Sidebar(user=self.user, parent=self)
+        self.main_layout.addWidget(self.sidebar)
 
+        # Main area
         main_area = QWidget()
-        area_layout = QVBoxLayout(main_area)
-        area_layout.setContentsMargins(0, 0, 0, 0)
+        self.area_layout = QVBoxLayout(main_area)
+        self.area_layout.setContentsMargins(0, 0, 0, 0)
 
+        # Topbar
         self.topbar = Topbar(user=self.user)
-        area_layout.addWidget(self.topbar)
+        self.area_layout.addWidget(self.topbar)
 
-        # --- Buttons Layout ---
+        # Buttons Layout
         btn_layout = QHBoxLayout()
         btn_layout.setContentsMargins(12, 6, 12, 6)
         btn_layout.addStretch(1)
@@ -121,23 +125,44 @@ class MainWindow(QMainWindow):
         btn_layout.addWidget(self.export_sales_btn)
 
         btn_layout.addStretch(1)
-        area_layout.addLayout(btn_layout)
+        self.area_layout.addLayout(btn_layout)
 
-        self.dashboard = Dashboard(user=self.user)
-        area_layout.addWidget(self.dashboard, 1)
+        # Dynamic content area
+        self.content_area = Dashboard(user=self.user, parent=self)
+        self.area_layout.addWidget(self.content_area, 1)
 
-        main_layout.addWidget(main_area, 1)
+        self.main_layout.addWidget(main_area, 1)
         self.setCentralWidget(central)
 
+        # Connect topbar signals
         self.topbar.add_product_clicked.connect(self.open_add_medicine_dialog)
         self.topbar.logout_clicked.connect(self.handle_logout)
 
+        # Configure role-based access
         self.configure_role_access()
+
+        # Connect sidebar buttons to switch content (already handled in Sidebar)
+        # No need to duplicate connections here since Sidebar handles it
+
+    def set_content(self, widget):
+        """Replace the content area with a new widget"""
+        if hasattr(self, 'content_area') and self.content_area:
+            self.area_layout.replaceWidget(self.content_area, widget)
+            self.content_area.deleteLater()
+            self.content_area = widget
+        else:
+            self.area_layout.addWidget(widget)
+            self.content_area = widget
 
     def configure_role_access(self):
         if self.user["role"] == "user":
             self.new_purchase_btn.hide()
             self.export_inventory_btn.hide()
+            # Hide admin-only sidebar buttons
+            for text, btn in self.sidebar.sidebar_buttons.items():
+                if any(text in item for item in [("Purchase", True), ("Product", True), ("Medicine", True),
+                                               ("Orders", True), ("Sales Report", True), ("Settings", True)]):
+                    btn.hide()
 
     def open_add_medicine_dialog(self):
         if self.user["role"] != "admin":
@@ -148,16 +173,15 @@ class MainWindow(QMainWindow):
             med = dialog.get_data()
             try:
                 add_medicine(med)
+                self.refresh_all()
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Failed to add medicine:\n{str(e)}")
-                return
-            self.dashboard.load_table_data()
 
     def open_sale_dialog(self):
         try:
-            dlg = SaleDialog(self)
+            dlg = SaleDialog(self.user, self)
             if dlg.exec_():
-                self.dashboard.load_table_data()
+                self.refresh_all()
         except Exception as e:
             QMessageBox.critical(self, "Sale Error", f"An error occurred while processing the sale:\n{str(e)}")
 
@@ -166,9 +190,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Permission Denied", "Only admin can record purchases.")
             return
         try:
-            dlg = PurchaseDialog(self)
+            dlg = PurchaseDialog(self.user, self)
             if dlg.exec_():
-                self.dashboard.load_table_data()
+                self.refresh_all()
         except Exception as e:
             QMessageBox.critical(self, "Purchase Error", f"An error occurred while processing the purchase:\n{str(e)}")
 
@@ -177,45 +201,41 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Permission Denied", "Only admin can export inventory data.")
             return
         from db import get_inventory_data
-        data = get_inventory_data()
-        if not data:
-            QMessageBox.information(self, "Export Inventory", "No inventory data to export.")
-            return
-        path, _ = QFileDialog.getSaveFileName(self, "Save Inventory CSV", "inventory.csv", "CSV Files (*.csv)")
-        if not path:
-            return
         try:
-            with open(path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(data[0].keys())
-                for row in data:
-                    writer.writerow(row.values())
-            QMessageBox.information(self, "Export Inventory", f"Inventory exported to {path}")
+            data = get_inventory_data()
+            if not data:
+                QMessageBox.information(self, "Export Inventory", "No inventory data to export.")
+                return
+            path, _ = QFileDialog.getSaveFileName(self, "Save Inventory CSV", "inventory.csv", "CSV Files (*.csv)")
+            if path:
+                with open(path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(data[0].keys())
+                    for row in data:
+                        writer.writerow(row.values())
+                QMessageBox.information(self, "Export Inventory", f"Inventory exported to {path}")
         except Exception as e:
             QMessageBox.critical(self, "Export Error", str(e))
 
     def export_sales_csv(self):
         from db import get_sales_data
-        data = get_sales_data()
-        if not data:
-            QMessageBox.information(self, "Export Sales", "No sales data to export.")
-            return
-        path, _ = QFileDialog.getSaveFileName(self, "Save Sales CSV", "sales.csv", "CSV Files (*.csv)")
-        if not path:
-            return
         try:
-            with open(path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(data[0].keys())
-                for row in data:
-                    writer.writerow(row.values())
-            QMessageBox.information(self, "Export Sales", f"Sales exported to {path}")
+            data = get_sales_data()
+            if not data:
+                QMessageBox.information(self, "Export Sales", "No sales data to export.")
+                return
+            path, _ = QFileDialog.getSaveFileName(self, "Save Sales CSV", "sales.csv", "CSV Files (*.csv)")
+            if path:
+                with open(path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(data[0].keys())
+                    for row in data:
+                        writer.writerow(row.values())
+                QMessageBox.information(self, "Export Sales", f"Sales exported to {path}")
         except Exception as e:
             QMessageBox.critical(self, "Export Error", str(e))
 
     def handle_logout(self):
-        # Only show login dialog if user chose "Switch Account"/logout,
-        # but if closed via X, just exit (no re-login dialog).
         self.hide()
         from widgets.login_dialog import LoginDialog
         login = LoginDialog()
@@ -227,23 +247,31 @@ class MainWindow(QMainWindow):
         self.close()
 
     def closeEvent(self, event):
-        # Just accept, no login dialog on app exit via X
         event.accept()
+
     def refresh_all(self):
         """Refresh all data views in the application"""
-        self.dashboard.load_table_data()
-    # Add this method to your main window class
+        if hasattr(self, 'content_area') and hasattr(self.content_area, 'load_table_data'):
+            self.content_area.load_table_data()
+        if hasattr(self, 'content_area') and hasattr(self.content_area, 'load_dashboard_data'):
+            self.content_area.load_dashboard_data()
+        # Add calls to refresh other views as they become active
+        # e.g., self.products_view.load_data()
+        #        self.sales_report_view.load_data()
+
     def refresh_medicine_data(self):
         """Refresh all medicine-related UI components"""
-        # Example for a QComboBox
-        self.ui.medicine_combo.clear()
-        medicines = db.get_all_medicines()  # This now only returns in-stock meds
-        for med in medicines:
-            self.ui.medicine_combo.addItem(
-                f"{med['name']} ({med['strength']}) - Stock: {med['quantity']}",
-                med['id']
-            )
-        
-        # Refresh any other medicine lists or tables
-        if hasattr(self, 'medicine_table'):
-            self.update_medicine_table()
+        if hasattr(self, 'content_area') and hasattr(self.content_area, 'load_table_data'):
+            self.content_area.load_table_data()
+        medicines = get_all_medicines()
+        # Example for a QComboBox (if used in content_area)
+        if hasattr(self.content_area, 'medicine_combo'):
+            self.content_area.medicine_combo.clear()
+            for med in medicines:
+                self.content_area.medicine_combo.addItem(
+                    f"{med['name']} ({med['strength']}) - Stock: {med['quantity']}",
+                    med['id']
+                )
+        # Refresh any other medicine lists or tables if implemented
+        if hasattr(self.content_area) and hasattr(self.content_area, 'update_medicine_table'):
+            self.content_area.update_medicine_table()

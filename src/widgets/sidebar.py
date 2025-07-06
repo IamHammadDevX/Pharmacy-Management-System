@@ -1,7 +1,16 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLabel, QSizePolicy
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLabel, QSizePolicy, QDialog
 from PyQt5.QtCore import Qt
 from widgets.supplier_customer_management import SupplierCustomerManagement
 from widgets.invoice_dialog import InvoiceDialog
+from ui.dashboard import Dashboard
+from ui.purchase_dialog import PurchaseDialog
+from ui.sale_dialog import SaleDialog
+from ui.product_management import ProductManagement
+from ui.medicine_management import MedicineManagement
+from ui.orders_dialog import OrdersDialog
+from ui.sales_report import SalesReport
+from ui.help_support import HelpSupport
+from ui.settings_dialog import SettingsDialog
 
 class Sidebar(QWidget):
     def __init__(self, user=None, parent=None):
@@ -21,17 +30,17 @@ class Sidebar(QWidget):
 
         # (text, icon, admin_only, custom_handler)
         buttons = [
-            ("Dashboard", "🏠", False, None),
-            ("Purchase", "🛒", True, None),
-            ("Sale", "💵", False, None),
-            ("Product", "💊", True, None),
+            ("Dashboard", "🏠", False, "open_dashboard"),
+            ("Purchase", "🛒", True, "open_purchase_dialog"),
+            ("Sale", "💵", False, "open_sale_dialog"),
+            ("Product", "💊", True, "open_product_management"),
             ("Supplier & Customer", "👥", False, "open_supplier_customer_management"),
-            ("Medicine", "🧪", True, None),
-            ("Invoice", "🧾", False, "open_invoice_dialog"),  # Added handler
-            ("Orders", "📦", True, None),
-            ("Sales Report", "📈", True, None),
-            ("Help & Support", "❓", False, None),
-            ("Settings", "⚙️", True, None),
+            ("Medicine", "🧪", True, "open_medicine_management"),
+            ("Invoice", "🧾", False, "open_invoice_dialog"),
+            ("Orders", "📦", True, "open_orders_dialog"),
+            ("Sales Report", "📈", True, "open_sales_report"),
+            ("Help & Support", "❓", False, "open_help_support"),
+            ("Settings", "⚙️", True, "open_settings_dialog"),
         ]
 
         self.sidebar_buttons = {}
@@ -57,19 +66,73 @@ class Sidebar(QWidget):
             self.sidebar_buttons[text] = btn
 
             # Connect custom handlers
-            if custom_handler == "open_supplier_customer_management":
+            if custom_handler == "open_dashboard":
+                btn.clicked.connect(self.open_dashboard)
+            elif custom_handler == "open_purchase_dialog":
+                btn.clicked.connect(self.open_purchase_dialog)
+            elif custom_handler == "open_sale_dialog":
+                btn.clicked.connect(self.open_sale_dialog)
+            elif custom_handler == "open_product_management":
+                btn.clicked.connect(self.open_product_management)
+            elif custom_handler == "open_supplier_customer_management":
                 btn.clicked.connect(self.open_supplier_customer_management)
+            elif custom_handler == "open_medicine_management":
+                btn.clicked.connect(self.open_medicine_management)
             elif custom_handler == "open_invoice_dialog":
                 btn.clicked.connect(self.open_invoice_dialog)
+            elif custom_handler == "open_orders_dialog":
+                btn.clicked.connect(self.open_orders_dialog)
+            elif custom_handler == "open_sales_report":
+                btn.clicked.connect(self.open_sales_report)
+            elif custom_handler == "open_help_support":
+                btn.clicked.connect(self.open_help_support)
+            elif custom_handler == "open_settings_dialog":
+                btn.clicked.connect(self.open_settings_dialog)
 
         layout.addStretch()
         self.setLayout(layout)
 
+    def open_dashboard(self):
+        """Switch to Dashboard content in MainWindow"""
+        if self.main_window:
+            self.main_window.set_content(Dashboard(self.user, self.main_window))
+
+    def open_purchase_dialog(self):
+        dlg = PurchaseDialog(self.user, parent=self.main_window)
+        dlg.exec_()
+
+    def open_sale_dialog(self):
+        dlg = SaleDialog(self.user, parent=self.main_window)
+        dlg.exec_()
+
+    def open_product_management(self):
+        dlg = ProductManagement(self.user, parent=self.main_window)
+        dlg.exec_()
+
     def open_supplier_customer_management(self):
-        dlg = SupplierCustomerManagement(self)
+        dlg = SupplierCustomerManagement(parent=self.main_window)
+        dlg.exec_()
+
+    def open_medicine_management(self):
+        dlg = MedicineManagement(self.user, parent=self.main_window)
         dlg.exec_()
 
     def open_invoice_dialog(self):
-        """Open invoice dialog with parent reference"""
-        dlg = InvoiceDialog(user=self.user, parent=self.main_window)
+        dlg = InvoiceDialog(self.user, parent=self.main_window)
+        dlg.exec_()
+
+    def open_orders_dialog(self):
+        dlg = OrdersDialog(self.user, parent=self.main_window)
+        dlg.exec_()
+
+    def open_sales_report(self):
+        dlg = SalesReport(self.user, parent=self.main_window)
+        dlg.exec_()
+
+    def open_help_support(self):
+        dlg = HelpSupport(self.user, parent=self.main_window)
+        dlg.exec_()
+
+    def open_settings_dialog(self):
+        dlg = SettingsDialog(self.user, parent=self.main_window)
         dlg.exec_()
