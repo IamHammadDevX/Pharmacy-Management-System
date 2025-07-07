@@ -39,3 +39,7 @@ htmlcov/
 # Jupyter Notebooks checkpoints
 .ipynb_checkpoints/
 *.sqbpro
+installer/
+*.iss
+Output/
+*.exe

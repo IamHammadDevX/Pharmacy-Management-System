@@ -6,6 +6,8 @@ from datetime import datetime
 import re
 import bcrypt
 from PyQt5.QtCore import QObject, pyqtSignal
+import os
+import sys
 
 class DBSignals(QObject):
     medicine_updated = pyqtSignal()
@@ -14,14 +16,23 @@ class DBSignals(QObject):
 
 db_signals = DBSignals()
 
-DB_FILE = "pharmacy.db"
+# --- Make DB Path Portable for PyInstaller ---
+def resource_path(relative_path):
+    """Get absolute path to resource (works for dev and PyInstaller .exe)."""
+    if getattr(sys, 'frozen', False):  # Running in PyInstaller bundle
+        base_path = sys._MEIPASS
+    else:  # Running in normal dev mode
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+DB_FILE = resource_path("pharmacy.db")
 
 def get_connection():
     # MODIFIED: Setting row_factory to sqlite3.Row for easier column access
-    # This is highly recommended for all your database interactions
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    conn.row_factory = sqlite3.Row # Enable dictionary-like access to rows
+    conn.row_factory = sqlite3.Row  # Enable dictionary-like access to rows
     return conn
+
 
 # --- Password Policy Utils ---
 
