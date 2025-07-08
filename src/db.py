@@ -8,7 +8,6 @@ import bcrypt
 from PyQt5.QtCore import QObject, pyqtSignal
 import os
 import sys
-import shutil
 
 class DBSignals(QObject):
     medicine_updated = pyqtSignal()
@@ -17,49 +16,23 @@ class DBSignals(QObject):
 
 db_signals = DBSignals()
 
-# --- Get a Writable Database Path ---
-def get_writable_db_path():
-    """
-    Determines the correct writable path for the database:
-    - Dev mode: Uses pharmacy.db from project root (one level above src/).
-    - Packaged .exe: Copies pharmacy.db to PUBLIC\PharmacyData if not already present.
-    """
-    if getattr(sys, 'frozen', False):
-        # --- Running in PyInstaller packaged app ---
-        try:
-            public_dir = os.path.join(os.environ.get('PUBLIC', r'C:/Users/Public'), 'PharmacyData')
-            if not os.path.exists(public_dir):
-                os.makedirs(public_dir, exist_ok=True)
+# --- Make DB Path Portable for PyInstaller ---
+def resource_path(relative_path):
+    """Get absolute path to resource (works for dev and PyInstaller .exe)."""
+    if getattr(sys, 'frozen', False):  # Running in PyInstaller bundle
+        base_path = sys._MEIPASS
+    else:  # Running in normal dev mode
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
-            db_path = os.path.join(public_dir, 'pharmacy.db')
-
-            if not os.path.exists(db_path):
-                # Copy bundled DB from the app directory
-                bundled_db = os.path.join(sys._MEIPASS, 'pharmacy.db')
-                if os.path.exists(bundled_db):
-                    shutil.copy2(bundled_db, db_path)
-                else:
-                    print(f"⚠️ Warning: Bundled DB not found at {bundled_db}")
-
-            return db_path
-        except Exception as e:
-            print(f"❌ Error setting up writable DB: {e}")
-            raise
-    else:
-        # --- Running in development mode ---
-        project_root_db = os.path.join(os.path.dirname(os.path.dirname(__file__)), "pharmacy.db")
-        if not os.path.exists(project_root_db):
-            print(f"⚠️ Warning: Development DB not found at {project_root_db}")
-        return project_root_db
-
-# Global DB file path
-DB_FILE = get_writable_db_path()
+DB_FILE = resource_path("pharmacy.db")
 
 def get_connection():
-    """Returns a SQLite connection with dictionary-like row access."""
+    # MODIFIED: Setting row_factory to sqlite3.Row for easier column access
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
+    conn.row_factory = sqlite3.Row  # Enable dictionary-like access to rows
     return conn
+
 
 # --- Password Policy Utils ---
 
