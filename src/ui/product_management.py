@@ -1,7 +1,9 @@
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QHBoxLayout, QStatusBar, QMessageBox, QHeaderView, QPushButton
+from PyQt5.QtWidgets import (
+    QDialog, QVBoxLayout, QLabel, QHBoxLayout, QStatusBar, QMessageBox, QPushButton, QLineEdit
+)
 from PyQt5.QtCore import Qt
 from widgets.paginated_table import PaginatedTable
-from db import get_all_medicines, add_medicine, update_medicine, delete_medicine, db_signals
+from db import get_all_medicines, update_medicine, delete_medicine, db_signals
 from widgets.add_medicine_dialog import AddMedicineDialog
 
 class ProductManagement(QDialog):
@@ -42,6 +44,22 @@ class ProductManagement(QDialog):
             }
         """)
         main_layout.addWidget(header)
+
+        # Fast Search Bar
+        search_layout = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("🔍 Fast search by name, batch, strength, expiry, etc...")
+        self.search_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px; border: 2px solid #bdc3c7; border-radius: 10px;
+                font-size: 15px; background: white; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+                margin-bottom: 5px;
+            }
+            QLineEdit:focus { border-color: #3498db; outline: none; }
+        """)
+        self.search_input.textChanged.connect(self.filter_fast_table)
+        search_layout.addWidget(self.search_input)
+        main_layout.addLayout(search_layout)
 
         # Paginated Table
         self.table = PaginatedTable(self)
@@ -134,46 +152,47 @@ class ProductManagement(QDialog):
         main_layout.addWidget(self.status_bar)
 
         self.setLayout(main_layout)
+        self.all_medicines = []
         self.load_products()
 
     def load_products(self):
-        """Load all medicines into the paginated table"""
         try:
-            medicines = get_all_medicines()
-            if not medicines:
+            self.all_medicines = get_all_medicines()
+            if not self.all_medicines:
                 self.status_bar.showMessage("No products found.", 3000)
                 self.table.set_data([])
                 return
-            self.table.set_data(medicines)
-            self.status_bar.showMessage(f"Loaded {len(medicines)} products.", 3000)
+            self.table.set_data(self.all_medicines)
+            self.status_bar.showMessage(f"Loaded {len(self.all_medicines)} products.", 3000)
+            self.filter_fast_table()
         except Exception as e:
             self.status_bar.showMessage(f"Error loading products: {str(e)}", 5000)
 
+    def filter_fast_table(self):
+        """Fast, in-memory, case-insensitive search for 20k+ products."""
+        q = self.search_input.text().strip().lower()
+        if not q:
+            self.table.set_data(self.all_medicines)
+            return
+        keys = ["name", "strength", "batch_no", "expiry_date", "quantity", "unit_price"]
+        filtered = [
+            m for m in self.all_medicines
+            if any(q in str(m.get(k, "")).lower() for k in keys)
+        ]
+        self.table.set_data(filtered)
+
     def add_product(self):
-        """Add a new medicine with validation and signal emission"""
+        """Open add dialog, but do NOT save again here!"""
         if not self.user or self.user.get("role") != "admin":
             self.status_bar.showMessage("Access denied: Admin only.", 3000)
             return
         dialog = AddMedicineDialog(self)
         if dialog.exec_() == dialog.Accepted:
-            med = dialog.get_data()
-            if not med.get("name") or not med.get("name").strip():
-                self.status_bar.showMessage("Error: Product name is required.", 3000)
-                return
-            if med.get("quantity", 0) < 0 or med.get("unit_price", 0.0) < 0:
-                self.status_bar.showMessage("Error: Quantity and price must be non-negative.", 3000)
-                return
-            med["name"] = med["name"].strip().title()
-            try:
-                add_medicine(med)
-                db_signals.medicine_updated.emit()  # Signal update to all views
-                self.load_products()
-                self.status_bar.showMessage("Product added successfully.", 3000)
-            except Exception as e:
-                self.status_bar.showMessage(f"Error adding product: {str(e)}", 5000)
+            db_signals.medicine_updated.emit()
+            self.load_products()
+            self.status_bar.showMessage("Product added successfully.", 3000)
 
     def edit_product(self, med):
-        """Edit the selected medicine with validation and signal emission"""
         if not self.user or self.user.get("role") != "admin":
             self.status_bar.showMessage("Access denied: Admin only.", 3000)
             return
@@ -189,18 +208,16 @@ class ProductManagement(QDialog):
             new_data["name"] = new_data["name"].strip().title()
             try:
                 update_medicine(med["id"], new_data)
-                db_signals.medicine_updated.emit()  # Signal update to all views
+                db_signals.medicine_updated.emit()
                 self.load_products()
                 self.status_bar.showMessage("Product updated successfully.", 3000)
             except Exception as e:
                 self.status_bar.showMessage(f"Error updating product: {str(e)}", 5000)
 
     def delete_product(self, med_id):
-        """Delete the selected medicine with specific confirmation and signal emission"""
         if not self.user or self.user.get("role") != "admin":
             self.status_bar.showMessage("Access denied: Admin only.", 3000)
             return
-        # Find the medicine to get its name
         try:
             medicines = get_all_medicines()
             med = next((m for m in medicines if m["id"] == med_id), None)
@@ -209,11 +226,11 @@ class ProductManagement(QDialog):
                 return
             med_name = med["name"]
             reply = QMessageBox.question(self, "Confirm Delete", f"Are you sure you want to delete '{med_name}' (ID: {med_id})?",
-                                       QMessageBox.Yes | QMessageBox.No)
+                                        QMessageBox.Yes | QMessageBox.No)
             if reply == QMessageBox.Yes:
                 try:
                     delete_medicine(med_id)
-                    db_signals.medicine_updated.emit()  # Signal update to all views
+                    db_signals.medicine_updated.emit()
                     self.load_products()
                     self.status_bar.showMessage(f"Product '{med_name}' deleted successfully.", 3000)
                 except Exception as e:

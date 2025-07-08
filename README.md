@@ -1,215 +1,148 @@
-Pharmacy Management System
-A modern, secure, and user-friendly desktop application for managing pharmacy inventory, sales, and users.
-Built with Python 3, PyQt5, and SQLite.
+# Pharmacy Management System
 
-🚀 Features
-User Authentication: Secure login with role-based access (Admin & Receptionist/User)
+A modern full-featured Pharmacy Management System built in Python with PyQt5.
 
-Password Security: Passwords are hashed with bcrypt for safety
+---
 
-Inventory Management: Add, edit, delete, and search medicines by name, batch, expiry, etc.
+## 🚀 Features
 
-Sales & Purchases: Record and view sales/purchase history with customer/supplier info
+- **Medicine/Product Inventory:** Add, edit, delete, and search medicines with all details (batch, expiry, price, stock).
+- **Fast Search:** Instantly filter/search from tens of thousands of medicines.
+- **Expiry & Low Stock Alerts:** Automatic warnings for expiring/expired and low stock items.
+- **Paginated Data Tables:** For smooth browsing of large datasets.
+- **Sales (POS):** 
+  - Per-product and per-line discount.
+  - Prevents selling expired medicines.
+  - Customer management (walk-in/existing/new).
+  - Printable receipts (₨ Pakistani Rupee format).
+- **Purchase:** 
+  - Supplier management.
+  - Records and updates stock, with expiry warning.
+- **Admin Controls:** Only admins can manage products and inventory.
+- **Export to CSV:** Export inventory for backup/analysis.
+- **Modern UI:** Clean, responsive PyQt5 interface.
 
-Order Management: Create new medicine orders, track their status (Pending, Approved, Rejected), and update order statuses.
+---
 
-Sales Report: Generate detailed sales reports with date filtering, showing total orders, total quantity sold, and sales broken down by medicine.
+## 🖥️ Screenshots
 
-User Settings: Allow logged-in users to change their password securely.
+*(Add screenshots here for Inventory, Sales, Purchase, Alerts, etc.)*
 
-Help & Support: Provides an in-app help section with FAQs and contact information.
+---
 
-Low Stock & Expiry Alerts: Dashboard cards show low stock and soon-to-expire medicines
+## 🛠️ Installation
 
-Role-Based UI: Receptionist has limited access; Admin sees all features
+### 1. Clone the Repository
 
-Modern UI: Responsive, clean, and easy to use with sidebar/topbar/dashboard layout
+```bash
+git clone https://github.com/YOUR_USERNAME/pharmacy-management-pyqt.git
+cd pharmacy-management-pyqt
+```
 
-Export Data: Export inventory, general sales history, and detailed sales reports as CSV.
+### 2. Set Up a Virtual Environment (Recommended)
 
-Optimized Performance: UI updates are batched for smoother table loading.
-
-Extendable: Modular code for easy enhancements
-
-🖥️ Screenshots
-Add screenshots/gifs here for login, dashboard, inventory, orders, sales report, and settings screens!
-
-🛠️ Setup Instructions
-1. Clone the repo
-git clone https://github.com/YOUR-USERNAME/pharmacy-management-app.git
-cd pharmacy-management-app
-
-2. Create a virtual environment and install dependencies
+```bash
 python -m venv venv
-# On Windows
+# On Windows:
 venv\Scripts\activate
-# On Mac/Linux
+# On macOS/Linux:
 source venv/bin/activate
+```
 
+### 3. Install Dependencies
+
+```bash
 pip install -r requirements.txt
+```
+If `requirements.txt` is missing, install manually:
+```bash
+pip install PyQt5
+```
 
-3. Initialize the Database
-On first run, the app creates the database and a default admin user:
+### 4. Run the Application
 
-Username: admin
-
-Password: Admin@123 (Note: Password is case-sensitive and includes special characters)
-
-To add a receptionist/user (if not already present):
-
-python src/db.py
-# Follow the prompts (if any, or just run to ensure defaults are created)
-
-4. Run the App
+If your project is in `src/` directory:
+```bash
 python src/main.py
+```
+Or if it's in root:
+```bash
+python main.py
+```
 
-👥 User Roles
-Admin
+### 5. First Use
 
-Full access: manage users, inventory (add/edit/delete medicines), record sales/purchases, manage orders (add/approve/reject), view sales reports, export all data, and access settings.
+- On first launch, create an admin user (if prompted).
+- All management features require admin login.
 
-Receptionist/User
+---
 
-Can view dashboard, record sales, view supplier & customer information, view invoices, and access help & support and personal settings. Cannot add purchases, manage inventory, manage orders, or export inventory/sales reports.
+## 🧑‍💻 Usage
 
-🔒 Security Notes
-All passwords are securely hashed (bcrypt) in the database.
+- **Inventory Management:** Add/edit/delete medicines. Use the search bar for instant filtering.
+- **Sales:** 
+  - Search and select non-expired medicines.
+  - Enter quantity and per-product discount.
+  - Fill customer info (walk-in/existing/new).
+  - Print receipt and record sale.
+- **Purchase:** 
+  - Add stock, record supplier info.
+  - Warning if medicine is expired.
+- **Alerts:** Click "Generate Alerts" for expiry and low stock warnings.
+- **Export:** Click "Export Inventory" to back up to CSV.
 
-Only admins should know the admin password.
+---
 
-Each staff member should have their own user account for accountability.
+## 📂 Project Structure
 
-The default admin password Admin@123 is for initial setup; it is highly recommended to change it after the first login.
+```
+pharmacy-management-pyqt/
+│
+├── src/
+│   ├── main.py
+│   ├── db.py
+│   ├── ...
+│   ├── widgets/
+│   │   ├── paginated_table.py
+│   │   ├── add_medicine_dialog.py
+│   │   └── ...
+│   └── ...
+├── requirements.txt
+├── README.md
+└── ...
+```
 
-📁 Project Structure
-src/
-  main.py
-  db.py
-  widgets/
-    login_dialog.py
-    topbar.py
-    sidebar.py
-    dashboard_card.py
-    paginated_table.py
-    add_medicine_dialog.py
-    supplier_customer_management.py # Added based on your sidebar
-    invoice_dialog.py             # Added based on your sidebar
-  ui/
-    main_window.py
-    dashboard.py
-    medicine_management.py
-    orders_dialog.py
-    sales_dialog.py             # New: Sales Report Dialog
-    help_support_dialog.py      # New: Help & Support Dialog
-    settings_dialog.py          # New: Settings Dialog
-    product_management.py       # Added based on your sidebar
-    help_support.py             # Added based on your sidebar
-  sale_purchase_dialog.py
-pharmacy.db                 # ← SQLite DB (auto-created)
-requirements.txt
-.gitignore
-README.md
+---
 
-📋 .gitignore
-Make sure you’re not pushing sensitive or environment files.
-Typical .gitignore for this project:
+## 💸 Currency
 
-venv/
-__pycache__/
-*.pyc
-*.db
-*.sqlite3
-*.csv
-*.log
-.idea/
-.vscode/
-.DS_Store
+All prices are shown and printed with Pakistani Rupee symbol (₨).
 
-🚩 Troubleshooting
-No receptionist/user in dropdown?
+---
 
-Run python src/db.py to ensure default users are created or add new ones.
+## 🐞 Troubleshooting
 
-Database locked or error?
+- **App won't start:** Ensure all dependencies are installed and you are using Python 3.7+.
+- **UI issues:** Try deleting `.pyc` files and re-running.
+- **Database errors:** Ensure SQLite database file has write permissions. Delete and restart for a fresh DB (be careful—this erases all data).
+- **Cannot manage products:** Only admin users have access.
 
-Make sure the app isn’t running in another window/process.
+---
 
-UI looks broken?
+## 📝 Customization
 
-Ensure all widget/UI files are in place and dependencies are installed (pip install -r requirements.txt).
+- **Change currency:** Update the symbol in receipt and table formatting in code.
+- **Adjust alert thresholds:** Change expiry/stock numbers in relevant methods.
+- **Change UI theme:** Edit stylesheet sections in the Python files.
 
-Password change fails?
+---
 
-Ensure your new password meets the strength requirements (8+ chars, upper, lower, digit, special char [@#$]).
+## 🎓 License
 
-🛡️ Best Practices
-Always run in a virtual environment.
-
-Never share or commit the SQLite DB with real data.
-
-Update passwords regularly.
-
-For production, consider adding audit logs and more robust user management UI.
-
-🙏 Contributing
-Pull requests are welcome! Fork the repo, create a branch, and submit a PR.
-
-📝 License
 MIT License
 
-📞 Contact
-For issues, please open a GitHub Issue or contact the maintainer.
+---
 
-test cases:
-Here are some unique medicine data entries you can use to manually populate your stock:
+## 👤 Author
 
-1.  **Medicine Name:** "Neurofen Plus"
-    * **Strength:** "200mg/12.8mg"
-    * **Batch No:** "NFPL2025A"
-    * **Expiry Date:** "2026-03-15"
-    * **Quantity:** 75
-    * **Unit Price:** 8.50
-
-2.  **Medicine Name:** "Zyrtec Allergy"
-    * **Strength:** "10mg"
-    * **Batch No:** "ZYRTEC005B"
-    * **Expiry Date:** "2027-08-01"
-    * **Quantity:** 120
-    * **Unit Price:** 12.25
-
-3.  **Medicine Name:** "Omeprazole"
-    * **Strength:** "20mg"
-    * **Batch No:** "OMPZ2024C"
-    * **Expiry Date:** "2025-11-30"
-    * **Quantity:** 90
-    * **Unit Price:** 5.75
-
-4.  **Medicine Name:** "Amoxicillin"
-    * **Strength:** "500mg"
-    * **Batch No:** "AMOX500X7"
-    * **Expiry Date:** "2026-06-20"
-    * **Quantity:** 60
-    * **Unit Price:** 10.00
-
-5.  **Medicine Name:** "Ventolin Inhaler"
-    * **Strength:** "100mcg/puff"
-    * **Batch No:** "VENTIL99D"
-    * **Expiry Date:** "2027-02-28"
-    * **Quantity:** 40
-    * **Unit Price:** 18.99
-
-6.  **Medicine Name:** "Lisinopril"
-    * **Strength:** "10mg"
-    * **Batch No:** "LISNPRL01E"
-    * **Expiry Date:** "2025-09-10"
-    * **Quantity:** 150
-    * **Unit Price:** 7.15
-
-7.  **Medicine Name:** "Metformin"
-    * **Strength:** "850mg"
-    * **Batch No:** "METFM850F"
-    * **Expiry Date:** "2026-12-05"
-    * **Quantity:** 100
-    * **Unit Price:** 6.90
-
-Remember to enter these details carefully into your medicine management section!
+- [HAMMAD](https://github.com/iamhammad_devx)

@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, 
+    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
     QMessageBox, QSizePolicy, QFileDialog
 )
 from PyQt5.QtCore import Qt
@@ -12,11 +12,10 @@ from ui.orders_dialog import OrdersDialog
 from ui.sales_report import SalesDialog
 from widgets.add_medicine_dialog import AddMedicineDialog
 
-# Import the newly created dialogs
-from ui.help_support import HelpSupportDialog # New import
-from ui.settings_dialog import SettingsDialog     # New import
+from ui.help_support import HelpSupportDialog
+from ui.settings_dialog import SettingsDialog
 
-from db import add_medicine, db_signals, get_all_medicines, get_inventory_data, get_sales_data, get_all_orders, update_order_status
+from db import db_signals, get_all_medicines, get_inventory_data, get_sales_data, get_all_orders, update_order_status
 import csv
 
 class MainWindow(QMainWindow):
@@ -38,9 +37,6 @@ class MainWindow(QMainWindow):
 
         # Sidebar
         self.sidebar = Sidebar(user=self.user, parent=self)
-        # No direct signal connections here from sidebar, as sidebar handles its own button clicks
-        # and calls methods like open_sales_report directly.
-
         self.main_layout.addWidget(self.sidebar)
 
         # Main area
@@ -52,7 +48,7 @@ class MainWindow(QMainWindow):
         self.topbar = Topbar(user=self.user)
         self.area_layout.addWidget(self.topbar)
 
-        # Buttons Layout (existing buttons)
+        # Buttons Layout
         btn_layout = QHBoxLayout()
         btn_layout.setContentsMargins(12, 6, 12, 6)
         btn_layout.addStretch(1)
@@ -153,7 +149,6 @@ class MainWindow(QMainWindow):
         self.configure_role_access()
 
     def set_content(self, widget):
-        """Replace the content area with a new widget"""
         if hasattr(self, 'content_area') and self.content_area:
             self.area_layout.replaceWidget(self.content_area, widget)
             self.content_area.deleteLater()
@@ -166,28 +161,21 @@ class MainWindow(QMainWindow):
         if self.user["role"] == "user":
             self.new_purchase_btn.hide()
             self.export_inventory_btn.hide()
-            # The sidebar's configure_role_access should handle its own button visibility.
-            # No need to hide sidebar buttons from here if Sidebar class already does it.
-            pass
 
     def open_add_medicine_dialog(self):
         if self.user["role"] != "admin":
             QMessageBox.warning(self, "Permission Denied", "Only admin can add medicines.")
             return
         dialog = AddMedicineDialog(self)
+        # Only refresh after dialog accepted, NO db.add_medicine here!
         if dialog.exec_() == dialog.Accepted:
-            med = dialog.get_data()
-            try:
-                add_medicine(med)
-                self.refresh_all()
-            except Exception as e:
-                QMessageBox.critical(self, "Database Error", f"Failed to add medicine:\n{str(e)}")
+            self.refresh_all()
 
     def open_sale_dialog(self):
         try:
             dlg = SaleDialog(parent=self)
             if hasattr(dlg, 'user'):
-                dlg.user = self.user  # Pass user context if supported
+                dlg.user = self.user
             if dlg.exec_():
                 self.refresh_all()
         except Exception as e:
@@ -200,7 +188,7 @@ class MainWindow(QMainWindow):
         try:
             dlg = PurchaseDialog(parent=self)
             if hasattr(dlg, 'user'):
-                dlg.user = self.user  # Pass user context if supported
+                dlg.user = self.user
             if dlg.exec_():
                 self.refresh_all()
         except Exception as e:
@@ -228,11 +216,10 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Export Error", str(e))
 
     def export_sales_csv(self):
-        # This export is for the general sales history, not the detailed report
         if self.user["role"] != "admin":
             QMessageBox.warning(self, "Permission Denied", "Only admin can export sales data.")
             return
-        from db import get_sales_data # This is the general sales history function
+        from db import get_sales_data
         try:
             data = get_sales_data()
             if not data:
@@ -264,28 +251,21 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def refresh_all(self):
-        """Refresh all data views in the application"""
         if hasattr(self, 'content_area') and hasattr(self.content_area, 'load_table_data'):
             self.content_area.load_table_data()
         if hasattr(self, 'content_area') and hasattr(self.content_area, 'load_dashboard_data'):
             self.content_area.load_dashboard_data()
-        # Refresh MedicineManagement if open
         if isinstance(self.content_area, MedicineManagement):
             self.content_area.load_medicines()
-        # Refresh OrdersDialog if open
         if isinstance(self.content_area, OrdersDialog):
             self.content_area.load_orders()
-        # Refresh SalesDialog if open
         if isinstance(self.content_area, SalesDialog):
             self.content_area.load_sales_data()
 
-
     def refresh_medicine_data(self):
-        """Refresh all medicine-related UI components"""
         if hasattr(self, 'content_area') and hasattr(self.content_area, 'load_table_data'):
             self.content_area.load_table_data()
         medicines = get_all_medicines()
-        # Example for a QComboBox (if used in content_area)
         if hasattr(self.content_area, 'medicine_combo'):
             self.content_area.medicine_combo.clear()
             for med in medicines:
@@ -293,15 +273,12 @@ class MainWindow(QMainWindow):
                     f"{med['name']} ({med['strength']}) - Stock: {med['quantity']}",
                     med['id']
                 )
-        # Refresh MedicineManagement if open
         if isinstance(self.content_area, MedicineManagement):
             self.content_area.load_medicines()
-        # Refresh any other medicine lists or tables if implemented
         if hasattr(self.content_area) and hasattr(self.content_area, 'update_medicine_table'):
             self.content_area.update_medicine_table()
 
     def open_medicine_management(self):
-        """Open Medicine Inventory Management dialog"""
         if self.user["role"] != "admin":
             QMessageBox.warning(self, "Permission Denied", "Only admin can manage medicine inventory.")
             return
@@ -309,7 +286,6 @@ class MainWindow(QMainWindow):
         dialog.exec_()
         
     def open_orders_dialog(self):
-        """Open Orders Management dialog"""
         if self.user["role"] != "admin":
             QMessageBox.warning(self, "Permission Denied", "Only admin can manage orders.")
             return
@@ -317,22 +293,16 @@ class MainWindow(QMainWindow):
         dialog.exec_()
 
     def open_sales_report(self):
-        """Open Sales Report dialog."""
         if self.user["role"] != "admin":
             QMessageBox.warning(self, "Permission Denied", "Only admin can view sales reports.")
             return
         dialog = SalesDialog(user=self.user, parent=self)
         dialog.exec_()
     
-    # New methods for Help & Support and Settings
     def open_help_support(self):
-        """Open Help & Support dialog."""
-        # No role check needed for help
         dialog = HelpSupportDialog(user=self.user, parent=self)
         dialog.exec_()
 
     def open_settings_dialog(self):
-        """Open Settings dialog."""
-        # No role check needed here, as the dialog itself will handle user context
         dialog = SettingsDialog(user=self.user, parent=self)
         dialog.exec_()

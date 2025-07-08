@@ -1,34 +1,79 @@
-from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QLabel, QMessageBox, 
-                            QLineEdit, QPushButton, QDialog, QTableWidget, 
-                            QTableWidgetItem, QHeaderView)
+from PyQt5.QtWidgets import (
+    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QMessageBox,
+    QLineEdit, QPushButton, QDialog, QTableWidget,
+    QTableWidgetItem, QHeaderView, QFileDialog
+)
 from PyQt5.QtCore import Qt
 from widgets.dashboard_card import DashboardCard
 from widgets.paginated_table import PaginatedTable
 from db import get_all_medicines, update_medicine, delete_medicine, get_sales_history
 from widgets.add_medicine_dialog import AddMedicineDialog
 from datetime import datetime, timedelta
+import csv
 
 class DetailDialog(QDialog):
-    def __init__(self, title, data, headers, parent=None):
+    def __init__(self, title, data, headers, parent=None, allow_csv=False, csv_default_name="details.csv"):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
-        self.setMinimumSize(600, 400)
+        self.setMinimumSize(700, 450)
         layout = QVBoxLayout()
+        # Search bar for fast filter
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("🔍 Fast search...")
+        self.search_input.setStyleSheet(
+            "padding: 7px; border: 1.5px solid #ccc; border-radius: 8px; font-size: 14px;"
+        )
+        layout.addWidget(self.search_input)
+        # Table
+        self.headers = headers
+        self.raw_data = data[:]  # for search filtering
         self.table = QTableWidget(len(data), len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._populate_table(data)
         layout.addWidget(self.table)
+        # CSV export button
+        if allow_csv:
+            btn_csv = QPushButton("⬇️ Save as CSV")
+            btn_csv.setStyleSheet("background: #16a085; color: white; padding: 7px 15px; border-radius: 7px;")
+            btn_csv.clicked.connect(lambda: self.save_csv(csv_default_name))
+            layout.addWidget(btn_csv)
         self.setLayout(layout)
+        self.search_input.textChanged.connect(self._fast_filter_table)
 
     def _populate_table(self, data):
+        self.table.setRowCount(len(data))
         for row, row_data in enumerate(data):
             for col, value in enumerate(row_data):
                 item = QTableWidgetItem(str(value))
                 item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(row, col, item)
+
+    def _fast_filter_table(self):
+        q = self.search_input.text().strip().lower()
+        if not q:
+            filtered = self.raw_data
+        else:
+            filtered = [
+                row for row in self.raw_data
+                if any(q in str(cell).lower() for cell in row)
+            ]
+        self._populate_table(filtered)
+
+    def save_csv(self, default_name):
+        path, _ = QFileDialog.getSaveFileName(self, "Save as CSV", default_name, "CSV Files (*.csv)")
+        if path:
+            try:
+                with open(path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(self.headers)
+                    for row in range(self.table.rowCount()):
+                        writer.writerow([self.table.item(row, col).text() for col in range(self.table.columnCount())])
+                QMessageBox.information(self, "Success", f"Saved to {path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to save CSV:\n{str(e)}")
 
 class Dashboard(QWidget):
     def __init__(self, user=None, parent=None):
@@ -145,7 +190,6 @@ class Dashboard(QWidget):
 
         self.load_table_data()
 
-    # Replace load_table_data
     def load_table_data(self):
         self.medicines = get_all_medicines()
         today = datetime.now().strftime("%Y-%m-%d")
@@ -169,14 +213,12 @@ class Dashboard(QWidget):
             self.no_medicines_label.hide()
             self.table.set_data(self.medicines)
             return
-        filtered = next((m for m in self.medicines if any(str(m.get(k, "")).lower().startswith(query) 
-                                                        for k in ["name", "strength", "batch_no", 
-                                                                  "expiry_date", "quantity", "unit_price"])), None)
+        filtered = [m for m in self.medicines if any(query in str(m.get(k, "")).lower() 
+                                                     for k in ["name", "strength", "batch_no", 
+                                                               "expiry_date", "quantity", "unit_price"])]
         if filtered:
             self.no_medicines_label.hide()
-            self.table.set_data([m for m in self.medicines if any(str(m.get(k, "")).lower().startswith(query) 
-                                                                for k in ["name", "strength", "batch_no", 
-                                                                          "expiry_date", "quantity", "unit_price"])])
+            self.table.set_data(filtered)
         else:
             self.no_medicines_label.show()
             self.table.set_data([])
@@ -186,21 +228,21 @@ class Dashboard(QWidget):
         data = [[m["id"], m["name"], m.get("strength", "N/A"), m.get("batch_no", "N/A"), 
                  m.get("expiry_date", "N/A"), m.get("quantity", 0), f"${m.get('unit_price', 0):.2f}"] 
                 for m in self.medicines]
-        dialog = DetailDialog("Inventory Details", data, headers, self)
+        dialog = DetailDialog("Inventory Details", data, headers, self, allow_csv=True, csv_default_name="inventory.csv")
         dialog.exec_()
 
     def show_sales_details(self):
         headers = ["Sale ID", "Medicine", "Qty", "Customer", "Date"]
         data = [[s["id"], s["medicine_name"], s["quantity"], s.get("customer_name", "N/A"), s["date"]] 
                 for s in self.today_sales]
-        dialog = DetailDialog("Today's Sales Details", data, headers, self)
+        dialog = DetailDialog("Today's Sales Details", data, headers, self, allow_csv=True, csv_default_name="todays_sales.csv")
         dialog.exec_()
 
     def show_low_stock_details(self):
         headers = ["ID", "Name", "Strength", "Batch No", "Current Qty", "Unit Price"]
         data = [[m["id"], m["name"], m.get("strength", "N/A"), m.get("batch_no", "N/A"), 
                  m.get("quantity", 0), f"${m.get('unit_price', 0):.2f}"] for m in self.low_stock_meds]
-        dialog = DetailDialog("Low Stock Details", data, headers, self)
+        dialog = DetailDialog("Low Stock Details", data, headers, self, allow_csv=True, csv_default_name="low_stock.csv")
         dialog.exec_()
 
     def show_expiring_details(self):
@@ -210,7 +252,7 @@ class Dashboard(QWidget):
                  m.get("expiry_date", ""), m.get("quantity", 0), 
                  (datetime.strptime(m.get("expiry_date", ""), "%Y-%m-%d") - today).days 
                  if m.get("expiry_date") else "N/A"] for m in self.expiring_meds]
-        dialog = DetailDialog("Expiring Soon Details", data, headers, self)
+        dialog = DetailDialog("Expiring Soon Details", data, headers, self, allow_csv=True, csv_default_name="expiring_soon.csv")
         dialog.exec_()
 
     def edit_medicine(self, med):

@@ -4,175 +4,138 @@ from PyQt5.QtGui import QDoubleValidator, QTextDocument
 from PyQt5.QtPrintSupport import QPrinter, QPrintDialog
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QPushButton, QLabel, QLineEdit, QComboBox, QSpinBox, QMessageBox,
-    QHeaderView, QFormLayout, QFrame, QSizePolicy
+    QPushButton, QLabel, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QMessageBox,
+    QHeaderView, QFormLayout, QFrame, QSizePolicy, QAbstractItemView
 )
 from db import get_all_medicines, record_sale_with_stock_update, get_customers, add_customer, db_signals
 
+def is_expired(expiry_date_str):
+    """Returns True if expiry_date_str (format YYYY-MM-DD) is before today."""
+    try:
+        return datetime.datetime.strptime(expiry_date_str, "%Y-%m-%d").date() < datetime.date.today()
+    except Exception:
+        return False
+
 def generate_receipt_html(pharmacy_details, invoice_details, invoice_items, totals):
     """
-    Generates a compact, modern HTML receipt for printing.
-
-    Args:
-        pharmacy_details (dict): Contains name, address, phone.
-        invoice_details (dict): Contains invoice_number, date, cashier, customer.
-        invoice_items (list): List of dictionaries for each item sold.
-        totals (dict): Contains subtotal, discount, and total.
+    Generates a short, modern, centralized HTML receipt for thermal/roll printing.
+    Uses Pakistani Rupee symbol (₨ ) for currency.
     """
-    
-    # --- Start of HTML Template ---
     html = f"""
     <!DOCTYPE html>
-    <html lang="en">
+    <html>
     <head>
         <meta charset="UTF-8">
         <style>
-            /* Use inline styles as QTextDocument is picky */
             body {{
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 10pt;
-                color: #000;
-                line-height: 1.3;
-                width: 2.8in; /* Common receipt paper width (adjust if needed) */
-                margin: 0;
-                padding: 5px;
+                font-family: Arial, monospace, 'Courier New';
+                font-size: 11pt;
+                width: 2.6in;
+                margin: 0 auto;
+                color: #111;
+                background: #fff;
             }}
-            .container {{
-                padding: 10px;
-            }}
+            .centered {{ text-align: center; }}
+            .bold {{ font-weight: bold; }}
             .header {{
-                text-align: center;
-                margin-bottom: 10px;
+                margin-bottom: 6px;
             }}
             .header h2 {{
-                margin: 0;
-                font-size: 14pt;
+                margin: 0 0 2px 0;
+                font-size: 15pt;
                 font-weight: bold;
+                letter-spacing: 1px;
             }}
             .header p {{
-                margin: 2px 0;
+                margin: 0;
                 font-size: 9pt;
             }}
-            hr.dashed {{
-                border-top: 1px dashed #000;
-                border-bottom: none;
-                margin: 10px 0;
+            hr {{
+                border: none;
+                border-top: 1px dashed #bbb;
+                margin: 8px 0;
             }}
-            table {{
+            .meta {{
+                font-size: 8.5pt;
+                margin-bottom: 2px;
+            }}
+            .meta td {{ padding: 2px 0; }}
+            table.items {{
                 width: 100%;
+                font-size: 9pt;
                 border-collapse: collapse;
+                margin-bottom: 2px;
             }}
-            .meta-info td:first-child {{ text-align: left; }}
-            .meta-info td:last-child {{ text-align: right; }}
-
-            /* --- Items Table Specific Styles --- */
-            .items-table {{
-                border: 1px solid #000; /* Border around the entire table */
-                margin-top: 5px;
-                margin-bottom: 5px;
+            table.items th, table.items td {{
+                padding: 2px 2px;
             }}
-            .items-table th, .items-table td {{
-                padding: 4px 5px; /* Consistent padding for cells */
-                border: 1px solid #000; /* Borders for each cell */
-                word-wrap: break-word; /* Ensure long text wraps */
-            }}
-            .items-table thead th {{
-                background-color: #f0f0f0; /* Light background for header */
+            table.items th {{
+                border-bottom: 1px solid #bbb;
                 font-weight: bold;
-                text-align: center; /* Center align header text */
             }}
-            .items-table tbody td {{
-                vertical-align: top; /* Align content to the top within cells */
+            .right {{ text-align: right; }}
+            .totals {{
+                font-size: 10pt;
+                margin-top: 4px;
             }}
-            
-            /* Column specific alignments */
-            .items-table th:nth-child(1), .items-table td:nth-child(1) {{
-                text-align: left; /* Item Name - Left aligned */
-                width: 45%; /* Allocate more width to the item name */
+            .totals td {{
+                padding: 2px 0;
             }}
-            .items-table th:nth-child(2), .items-table td:nth-child(2) {{
-                text-align: center; /* Quantity - Center aligned */
-                width: 15%;
-            }}
-            .items-table th:nth-child(3), .items-table td:nth-child(3) {{
-                text-align: right; /* Unit Price - Right aligned */
-                width: 20%;
-            }}
-            .items-table th:nth-child(4), .items-table td:nth-child(4) {{
-                text-align: right; /* Total - Right aligned */
-                width: 20%;
-            }}
-
-            .totals-table td:first-child {{ text-align: right; font-weight: bold; }}
-            .totals-table td:last-child {{ text-align: right; width: 80px; }}
-            .grand-total td {{
-                font-size: 12pt;
+            .grandtotal td {{
                 font-weight: bold;
-                padding-top: 5px;
+                font-size: 11pt;
             }}
             .footer {{
+                margin-top: 8px;
+                font-size: 8.5pt;
                 text-align: center;
-                margin-top: 10px;
-                font-size: 9pt;
+                color: #999;
             }}
         </style>
     </head>
     <body>
-        <div class="container">
-            <div class="header">
-                <h2>{pharmacy_details['name']}</h2>
-                <p>{pharmacy_details['address']}</p>
-                <p>Phone: {pharmacy_details['phone']}</p>
-            </div>
-
-            <hr class="dashed">
-
-            <table class="meta-info">
-                <tr><td>Invoice #:</td><td>{invoice_details['invoice_number']}</td></tr>
-                <tr><td>Date:</td><td>{invoice_details['date']}</td></tr>
-                <tr><td>Cashier:</td><td>{invoice_details['cashier']}</td></tr>
-                <tr><td>Customer:</td><td>{invoice_details['customer']}</td></tr>
-            </table>
-
-            <hr class="dashed">
-
-            <table class="items-table">
-                <thead>
-                    <tr>
-                        <th>Item</th>
-                        <th>Qty</th>
-                        <th>Price</th>
-                        <th>Total</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {''.join([f"<tr><td>{item['name']} ({item['strength']})</td><td>{item['qty']}</td><td>${item['unit_price']:.2f}</td><td>${item['total']:.2f}</td></tr>" for item in invoice_items])}
-                </tbody>
-            </table>
-
-            <hr class="dashed">
-
-            <table class="totals-table">
-                <tr><td>Subtotal:</td><td>${totals['subtotal']:.2f}</td></tr>
-                <tr><td>Discount:</td><td>${totals['discount']:.2f}</td></tr>
-                <tr class="grand-total">
-                    <td>Grand Total:</td>
-                    <td>${totals['total']:.2f}</td>
+        <div class="header centered">
+            <h2>{pharmacy_details['name']}</h2>
+            <p>{pharmacy_details['address']}</p>
+            <p>Tel: {pharmacy_details['phone']}</p>
+        </div>
+        <hr>
+        <table class="meta" width="100%">
+            <tr><td>Invoice #:</td><td class="right">{invoice_details['invoice_number']}</td></tr>
+            <tr><td>Date:</td><td class="right">{invoice_details['date']}</td></tr>
+            <tr><td>Cashier:</td><td class="right">{invoice_details['cashier']}</td></tr>
+            <tr><td>Customer:</td><td class="right">{invoice_details['customer']}</td></tr>
+        </table>
+        <hr>
+        <table class="items">
+            <thead>
+                <tr>
+                    <th>Item</th>
+                    <th class="right">Qty</th>
+                    <th class="right">Rate</th>
+                    <th class="right">Disc</th>
+                    <th class="right">Amt</th>
                 </tr>
-            </table>
-            
-            <hr class="dashed">
-
-            <div class="footer">
-                <p>Thank you for your business!</p>
-                <p>Your Health, Our Priority.</p>
-            </div>
+            </thead>
+            <tbody>
+                {''.join([
+                    f"<tr><td>{item['name']}</td><td class='right'>{item['qty']}</td><td class='right'>₨ {item['unit_price']:.2f}</td><td class='right'>{item['discount']:.2f}%</td><td class='right'>₨ {item['total']:.2f}</td></tr>"
+                    for item in invoice_items
+                ])}
+            </tbody>
+        </table>
+        <hr>
+        <table class="totals" width="100%">
+            <tr class="grandtotal"><td>Total</td><td class="right">₨ {totals['total']:.2f}</td></tr>
+        </table>
+        <hr>
+        <div class="footer">
+            Thank you for shopping!<br>
+            <span style="font-size:7.5pt;">No returns without receipt.</span>
         </div>
     </body>
     </html>
     """
-    # --- End of HTML Template ---
-    
     return html
 
 class InvoiceDialog(QDialog):
@@ -181,86 +144,42 @@ class InvoiceDialog(QDialog):
         self.user = user
         self.parent_window = parent
         self.setWindowTitle("Create Invoice")
-        # Set a more reasonable initial size; the layout will be flexible.
-        self.setMinimumSize(900, 600) 
+        self.setMinimumSize(1000, 650) 
 
-        # --- Refined Stylesheet for a Modern POS Look ---
         self.setStyleSheet("""
-            QDialog {
-                background-color: #f0f2f5; /* Light grey background */
-            }
-            /* --- Left Sidebar Styling --- */
+            QDialog { background-color: #f0f2f5; }
             QFrame#left_sidebar {
                 background-color: #ffffff;
                 border-radius: 8px;
                 border: 1px solid #e0e0e0;
-                max-width: 320px; /* Constrain sidebar width */
+                max-width: 320px;
             }
-            /* --- Card Styling for Grouping Widgets --- */
             QFrame#card {
                 background-color: #f8f9fa;
                 border-radius: 8px;
                 border: 1px solid #e9ecef;
                 padding: 15px;
             }
-            QLabel {
-                font-size: 14px;
-                color: #34495e;
-            }
-            /* --- Main Header for the Invoice --- */
+            QLabel { font-size: 14px; color: #34495e; }
             QLabel#header_label {
-                font-size: 26px;
-                font-weight: bold;
-                color: #2c3e50;
-                padding-bottom: 10px;
+                font-size: 26px; font-weight: bold; color: #2c3e50; padding-bottom: 10px;
             }
-            /* --- Smaller labels for forms --- */
-            QFormLayout QLabel {
-                font-size: 13px;
-                font-weight: 500;
-                color: #2c3e50;
+            QFormLayout QLabel { font-size: 13px; font-weight: 500; color: #2c3e50; }
+            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+                border: 1.5px solid #b4c3d3; border-radius: 5px; padding: 8px; font-size: 13px; background-color: #f7fbff;
             }
-            QLineEdit, QComboBox, QSpinBox {
-                border: 1px solid #d0d0d0;
-                border-radius: 5px;
-                padding: 8px; /* Reduced padding for compact look */
-                font-size: 13px;
-                background-color: white;
-            }
-            QComboBox::drop-down {
-                border: none;
-            }
-            /* --- Buttons with Hover Effects --- */
+            QComboBox::drop-down { border: none; }
             QPushButton {
-                border-radius: 6px;
-                padding: 10px 15px;
-                font-weight: bold;
-                border: none;
-                color: white;
-                font-size: 14px;
-                transition: background 0.3s ease;
+                border-radius: 6px; padding: 10px 15px; font-weight: bold; border: none; color: white; font-size: 14px; transition: background 0.3s ease;
             }
-            QPushButton#add_item_btn {
-                background-color: #007bff; /* Blue */
-            }
-            QPushButton#add_item_btn:hover {
-                background-color: #0056b3;
-            }
-            QPushButton#remove_item_btn {
-                background-color: #dc3545; /* Red */
-            }
-            QPushButton#remove_item_btn:hover {
-                background-color: #c82333;
-            }
+            QPushButton#add_item_btn { background-color: #007bff; }
+            QPushButton#add_item_btn:hover { background-color: #0056b3; }
+            QPushButton#remove_item_btn { background-color: #dc3545; }
+            QPushButton#remove_item_btn:hover { background-color: #c82333; }
             QPushButton#print_invoice_btn {
-                background-color: #28a745; /* Green */
-                padding: 12px 25px; /* Make primary action button larger */
-                font-size: 15px;
+                background-color: #28a745; padding: 12px 25px; font-size: 15px;
             }
-            QPushButton#print_invoice_btn:hover {
-                background-color: #218838;
-            }
-            /* --- Table Styling --- */
+            QPushButton#print_invoice_btn:hover { background-color: #218838; }
             QTableWidget {
                 background-color: white;
                 border: 1px solid #e0e0e0;
@@ -277,82 +196,110 @@ class InvoiceDialog(QDialog):
                 font-weight: bold;
                 font-size: 13px;
             }
-            /* --- Totals Section Styling --- */
             QFrame#totals_frame {
                 background-color: #e6f7ff;
                 border: 1px solid #cceeff;
                 border-radius: 8px;
             }
-            QLabel#total_label {
-                font-size: 20px;
-                font-weight: bold;
-                color: #28a745;
-            }
+            QLabel#total_label { font-size: 20px; font-weight: bold; color: #28a745; }
         """)
-        
-        # --- Main Horizontal Layout (Sidebar + Main Content) ---
+
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(15, 15, 15, 15)
         main_layout.setSpacing(15)
 
-        # --- Left Sidebar Panel ---
         left_sidebar = QFrame()
         left_sidebar.setObjectName("left_sidebar")
         sidebar_layout = QVBoxLayout(left_sidebar)
         sidebar_layout.setContentsMargins(15, 15, 15, 15)
         sidebar_layout.setSpacing(20)
 
-        # --- Card 1: Add Medicine ---
         add_item_card = QFrame()
         add_item_card.setObjectName("card")
-        add_item_layout = QFormLayout(add_item_card)
-        add_item_layout.setSpacing(12)
-        add_item_layout.addRow(QLabel("<b>Add Medicine</b>"))
-        
-        self.medicine_combo = QComboBox()
-        self.load_medicines()
-        add_item_layout.addRow("Medicine:", self.medicine_combo)
+        add_item_layout = QVBoxLayout(add_item_card)
+        add_item_layout.setSpacing(8)
+        add_item_layout.addWidget(QLabel("<b>Search & Add Medicine</b>"))
 
+        self.medicine_search = QLineEdit()
+        self.medicine_search.setPlaceholderText("Search by name, strength, batch...")
+        self.medicine_search.textChanged.connect(self.filter_medicine_table)
+        add_item_layout.addWidget(self.medicine_search)
+
+        self.medicine_table = QTableWidget(0, 6)
+        self.medicine_table.setHorizontalHeaderLabels([
+            "Name", "Strength", "Batch", "Expiry", "Stock", "Price"
+        ])
+        self.medicine_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.medicine_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.medicine_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.medicine_table.setMinimumHeight(220)
+        self.medicine_table.setMaximumHeight(220)
+        self.medicine_table.doubleClicked.connect(self.select_medicine_from_table)
+        add_item_layout.addWidget(self.medicine_table)
+
+        # --- Improved Quantity & Discount Layout ---
+        qty_disc_widget = QFrame()
+        qty_disc_layout = QHBoxLayout(qty_disc_widget)
+        qty_disc_layout.setSpacing(18)
+        qty_disc_layout.setContentsMargins(0, 6, 0, 6)
+
+        # Quantity section
+        qty_vbox = QVBoxLayout()
+        qty_label = QLabel("Quantity")
+        qty_label.setStyleSheet("font-weight: bold; font-size: 13px; padding-bottom: 2px; color: #223b61;")
         self.quantity_spin = QSpinBox()
         self.quantity_spin.setMinimum(1)
         self.quantity_spin.setMaximum(9999)
-        add_item_layout.addRow("Quantity:", self.quantity_spin)
-        
+        self.quantity_spin.setFixedWidth(90)
+        qty_vbox.addWidget(qty_label)
+        qty_vbox.addWidget(self.quantity_spin)
+        qty_disc_layout.addLayout(qty_vbox)
+
+        # Discount section
+        disc_vbox = QVBoxLayout()
+        disc_label = QLabel("Discount")
+        disc_label.setStyleSheet("font-weight: bold; font-size: 13px; padding-bottom: 2px; color: #223b61;")
+        self.discount_spin = QDoubleSpinBox()
+        self.discount_spin.setMinimum(0)
+        self.discount_spin.setMaximum(100)
+        self.discount_spin.setSuffix('%')
+        self.discount_spin.setFixedWidth(90)
+        self.discount_spin.setValue(0.0)
+        disc_vbox.addWidget(disc_label)
+        disc_vbox.addWidget(self.discount_spin)
+        qty_disc_layout.addLayout(disc_vbox)
+
+        add_item_layout.addWidget(qty_disc_widget)
+
         btn_add = QPushButton("➕ Add Item")
         btn_add.setObjectName("add_item_btn")
         btn_add.setCursor(Qt.PointingHandCursor)
-        add_item_layout.addRow(btn_add)
-        
+        btn_add.clicked.connect(self.add_item)
+        add_item_layout.addWidget(btn_add)
         sidebar_layout.addWidget(add_item_card)
 
-        # --- Card 2: Customer Information ---
         customer_card = QFrame()
         customer_card.setObjectName("card")
         customer_layout = QFormLayout(customer_card)
         customer_layout.setSpacing(12)
         customer_layout.addRow(QLabel("<b>Customer Info</b>"))
-
         self.cust_type_combo = QComboBox()
         self.cust_type_combo.addItems(["Walk-in Customer", "Existing Customer", "New Customer"])
         self.cust_type_combo.currentIndexChanged.connect(self.toggle_customer_fields)
         customer_layout.addRow("Type:", self.cust_type_combo)
-        
         self.cust_combo = QComboBox()
-        self.load_customers()
         customer_layout.addRow("Select:", self.cust_combo)
-        
-        self.new_cust_name = QLineEdit(placeholderText="Full Name")
+        self.new_cust_name = QLineEdit()
+        self.new_cust_name.setPlaceholderText("Full Name")
         customer_layout.addRow("Name:", self.new_cust_name)
-        
-        self.new_cust_contact = QLineEdit(placeholderText="Phone/Email")
+        self.new_cust_contact = QLineEdit()
+        self.new_cust_contact.setPlaceholderText("Phone/Email")
         customer_layout.addRow("Contact:", self.new_cust_contact)
-        
         sidebar_layout.addWidget(customer_card)
-        sidebar_layout.addStretch() # Push cards to the top
-        
+        sidebar_layout.addStretch()
+
         main_layout.addWidget(left_sidebar)
 
-        # --- Right Main Content Panel ---
         right_panel = QFrame()
         right_panel_layout = QVBoxLayout(right_panel)
         right_panel_layout.setContentsMargins(0, 0, 0, 0)
@@ -361,17 +308,15 @@ class InvoiceDialog(QDialog):
         header_label = QLabel("Create Invoice")
         header_label.setObjectName("header_label")
         right_panel_layout.addWidget(header_label)
-        
-        # Invoice Table
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["Medicine", "Strength", "Qty", "Unit Price", "Total"])
+
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(["Medicine", "Strength", "Qty", "Unit Price", "Discount", "Total"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding) # Allow table to grow
+        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         right_panel_layout.addWidget(self.table)
 
-        # Remove Item Button (aligned to the right)
         remove_btn_layout = QHBoxLayout()
         remove_btn_layout.addStretch()
         btn_remove = QPushButton("🗑️ Remove")
@@ -380,30 +325,17 @@ class InvoiceDialog(QDialog):
         btn_remove.clicked.connect(self.remove_item)
         remove_btn_layout.addWidget(btn_remove)
         right_panel_layout.addLayout(remove_btn_layout)
-        
-        # Bottom section with totals and print button
+
         bottom_layout = QHBoxLayout()
-        
-        # Totals Frame
         totals_frame = QFrame()
         totals_frame.setObjectName("totals_frame")
         totals_layout = QFormLayout(totals_frame)
         totals_layout.setSpacing(10)
-
-        self.subtotal_label = QLabel("Subtotal: <b>$0.00</b>")
-        self.discount_input = QLineEdit("0.00")
-        self.discount_input.setValidator(QDoubleValidator(0.00, 99999.99, 2))
-        self.total_label = QLabel("Total: <b>$0.00</b>")
+        self.total_label = QLabel("Total: <b>₨ 0.00</b>")
         self.total_label.setObjectName("total_label")
-
-        totals_layout.addRow("Subtotal:", self.subtotal_label)
-        totals_layout.addRow("Discount:", self.discount_input)
         totals_layout.addRow(self.total_label)
-        
         bottom_layout.addWidget(totals_frame)
         bottom_layout.addStretch()
-
-        # Print Button
         print_btn_layout = QVBoxLayout()
         print_btn_layout.addStretch()
         btn_print = QPushButton("🖨️ Complete & Print")
@@ -412,51 +344,37 @@ class InvoiceDialog(QDialog):
         print_btn_layout.addWidget(btn_print)
         print_btn_layout.addStretch()
         bottom_layout.addLayout(print_btn_layout)
-
         right_panel_layout.addLayout(bottom_layout)
         main_layout.addWidget(right_panel)
-        
-        # --- Final Setup and Signals ---
+
         self.setLayout(main_layout)
-        self.toggle_customer_fields() # Initial field visibility
-        
         self.invoice_items = []
+        self.all_medicine_rows = []
+        self.load_medicines()
+        self.load_customers()
+        self.toggle_customer_fields()
         self.update_totals()
 
-        # Connect signals
-        btn_add.clicked.connect(self.add_item)
         btn_print.clicked.connect(self.print_and_record_invoice)
-        self.discount_input.textChanged.connect(self.update_totals)
         db_signals.medicine_updated.connect(self.load_medicines)
         db_signals.sale_recorded.connect(self.load_medicines)
 
     def load_medicines(self):
-        """Populate medicine dropdown, only showing in-stock items."""
-        current_selection = self.medicine_combo.currentData()
-        self.medicine_combo.clear()
-        self.medicine_combo.addItem("Select Medicine...", None)
+        self.all_medicine_rows = []
+        self.medicine_table.setRowCount(0)
         try:
-            all_medicines = get_all_medicines()
-            for med in all_medicines:
-                if med['quantity'] > 0:
-                    text = f"{med['name']} ({med['strength']}) - Stock: {med['quantity']}"
-                    self.medicine_combo.addItem(text, med)
-                else:
-                    text = f"{med['name']} ({med['strength']}) - OUT OF STOCK"
-                    self.medicine_combo.addItem(text, med)
-                    index = self.medicine_combo.findText(text)
-                    if index != -1:
-                        self.medicine_combo.model().item(index).setEnabled(False)
-            
-            if current_selection:
-                index = self.medicine_combo.findData(current_selection)
-                if index != -1:
-                    self.medicine_combo.setCurrentIndex(index)
+            all_meds = get_all_medicines()
+            for med in all_meds:
+                row = [
+                    med['name'], med['strength'], med['batch_no'],
+                    med['expiry_date'], str(med['quantity']), f"₨ {med['unit_price']:.2f}"
+                ]
+                self.all_medicine_rows.append((row, med))
+            self.filter_medicine_table()
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Could not load medicines: {e}")
 
     def load_customers(self):
-        """Populate customer dropdown."""
         self.cust_combo.clear()
         self.cust_combo.addItem("Select Customer...", None)
         try:
@@ -467,97 +385,129 @@ class InvoiceDialog(QDialog):
             QMessageBox.critical(self, "Database Error", f"Could not load customers: {e}")
 
     def toggle_customer_fields(self):
-        """Toggles visibility of customer input fields based on selection."""
         selection = self.cust_type_combo.currentText()
         is_existing = selection == "Existing Customer"
         is_new = selection == "New Customer"
-        
-        customer_layout = self.cust_combo.parent().layout()
-
         self.cust_combo.setVisible(is_existing)
-        label_for_cust_combo = customer_layout.labelForField(self.cust_combo)
+        label_for_cust_combo = self.cust_combo.parent().layout().labelForField(self.cust_combo) if self.cust_combo.parent() else None
         if label_for_cust_combo:
             label_for_cust_combo.setVisible(is_existing)
-
         self.new_cust_name.setVisible(is_new)
-        label_for_new_name = customer_layout.labelForField(self.new_cust_name)
+        label_for_new_name = self.new_cust_name.parent().layout().labelForField(self.new_cust_name) if self.new_cust_name.parent() else None
         if label_for_new_name:
             label_for_new_name.setVisible(is_new)
-
         self.new_cust_contact.setVisible(is_new)
-        label_for_new_contact = customer_layout.labelForField(self.new_cust_contact)
+        label_for_new_contact = self.new_cust_contact.parent().layout().labelForField(self.new_cust_contact) if self.new_cust_contact.parent() else None
         if label_for_new_contact:
             label_for_new_contact.setVisible(is_new)
 
-    def get_or_create_customer(self):
-        """Gets selected customer ID or creates a new customer."""
-        selection = self.cust_type_combo.currentText()
-        
-        if selection == "Existing Customer":
-            return self.cust_combo.currentData()
-        
-        if selection == "New Customer":
-            name = self.new_cust_name.text().strip()
-            contact = self.new_cust_contact.text().strip()
-            
-            if not name or not contact:
-                QMessageBox.warning(self, "Input Error", "New customer name and contact are required.")
-                return None
-            try:
-                return add_customer(name, contact, "") # Assuming address is optional
-            except Exception as e:
-                QMessageBox.critical(self, "Database Error", f"Failed to add new customer: {e}")
-                return None
-                
-        return None # Walk-in customer
+    def filter_medicine_table(self):
+        search = self.medicine_search.text().lower()
+        self.medicine_table.setRowCount(0)
+        for row_data, med in self.all_medicine_rows:
+            expired = is_expired(med.get("expiry_date", "2099-01-01"))
+            if (
+                search in row_data[0].lower() or
+                search in row_data[1].lower() or
+                search in row_data[2].lower()
+            ):
+                row_pos = self.medicine_table.rowCount()
+                self.medicine_table.insertRow(row_pos)
+                for col, value in enumerate(row_data):
+                    item = QTableWidgetItem(value)
+                    if expired:
+                        item.setForeground(Qt.red)
+                        item.setToolTip("Expired - cannot be purchased")
+                    elif col == 4 and int(med['quantity']) == 0:
+                        item.setForeground(Qt.red)
+                    self.medicine_table.setItem(row_pos, col, item)
+                self.medicine_table.setRowHeight(row_pos, 24)
+        self.medicine_table.clearSelection()
+
+    def select_medicine_from_table(self, idx):
+        row = idx.row()
+        if row < 0:
+            return
+        name = self.medicine_table.item(row, 0).text()
+        strength = self.medicine_table.item(row, 1).text()
+        batch = self.medicine_table.item(row, 2).text()
+        med = next(
+            (med for (row_data, med) in self.all_medicine_rows
+             if row_data[0] == name and row_data[1] == strength and row_data[2] == batch),
+            None
+        )
+        if med:
+            self.quantity_spin.setMaximum(med['quantity'] if med['quantity'] > 0 else 9999)
+            self.quantity_spin.setValue(1)
+            self.discount_spin.setValue(0.0)
+            self.selected_medicine = med
 
     def add_item(self):
-        """Adds selected medicine to the invoice table."""
-        med_data = self.medicine_combo.currentData()
-        if not med_data:
-            QMessageBox.warning(self, "Input Error", "Please select a medicine.")
+        selected_rows = self.medicine_table.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.warning(self, "Input Error", "Please select a medicine from the table.")
             return
-            
+        row = selected_rows[0].row()
+        name = self.medicine_table.item(row, 0).text()
+        strength = self.medicine_table.item(row, 1).text()
+        batch = self.medicine_table.item(row, 2).text()
+        med = next(
+            (med for (row_data, med) in self.all_medicine_rows
+             if row_data[0] == name and row_data[1] == strength and row_data[2] == batch),
+            None
+        )
+        if not med:
+            QMessageBox.warning(self, "Input Error", "Medicine not found. Please refresh and try again.")
+            return
+
+        # BLOCK EXPIRED
+        if is_expired(med.get("expiry_date", "2099-01-01")):
+            QMessageBox.warning(self, "Expired Medicine", f"{med['name']} is expired and cannot be sold.")
+            return
+
         qty = self.quantity_spin.value()
+        discount = self.discount_spin.value()
         if qty <= 0:
             return
 
         for item in self.invoice_items:
-            if item['id'] == med_data['id']:
+            if item['id'] == med['id']:
                 new_qty = item['qty'] + qty
-                if new_qty > med_data['quantity']:
-                    QMessageBox.warning(self, "Stock Error", f"Not enough stock for {med_data['name']}. Available: {med_data['quantity']}.")
+                if new_qty > med['quantity']:
+                    QMessageBox.warning(self, "Stock Error", f"Not enough stock for {med['name']}. Available: {med['quantity']}.")
                     return
                 item['qty'] = new_qty
-                item['total'] = new_qty * item['unit_price']
+                item['discount'] = discount  # Update discount for this line!
+                item['total'] = new_qty * med['unit_price'] * (1 - discount / 100)
                 break
-        else: 
-            if qty > med_data['quantity']:
-                QMessageBox.warning(self, "Stock Error", f"Not enough stock for {med_data['name']}. Available: {med_data['quantity']}.")
+        else:
+            if qty > med['quantity']:
+                QMessageBox.warning(self, "Stock Error", f"Not enough stock for {med['name']}. Available: {med['quantity']}.")
                 return
             self.invoice_items.append({
-                'id': med_data['id'], 'name': med_data['name'], 'strength': med_data['strength'],
-                'qty': qty, 'unit_price': med_data['unit_price'], 'total': qty * med_data['unit_price']
+                'id': med['id'], 'name': med['name'], 'strength': med['strength'],
+                'qty': qty,
+                'unit_price': med['unit_price'],
+                'discount': discount,
+                'total': qty * med['unit_price'] * (1 - discount / 100)
             })
-        
         self.update_table()
         self.update_totals()
-        self.medicine_combo.setCurrentIndex(0)
+        self.medicine_table.clearSelection()
+        self.medicine_search.clear()
         self.quantity_spin.setValue(1)
-    
+        self.discount_spin.setValue(0.0)
+
     def remove_item(self):
-        """Removes selected row from the invoice table."""
         selected_row = self.table.currentRow()
         if selected_row < 0:
             QMessageBox.warning(self, "Selection Error", "Please select an item to remove.")
             return
-        
         del self.invoice_items[selected_row]
         self.update_table()
         self.update_totals()
     
     def update_table(self):
-        """Refreshes the invoice table."""
         self.table.setRowCount(0)
         for item in self.invoice_items:
             row_pos = self.table.rowCount()
@@ -565,29 +515,33 @@ class InvoiceDialog(QDialog):
             self.table.setItem(row_pos, 0, QTableWidgetItem(item['name']))
             self.table.setItem(row_pos, 1, QTableWidgetItem(item['strength']))
             self.table.setItem(row_pos, 2, QTableWidgetItem(str(item['qty'])))
-            self.table.setItem(row_pos, 3, QTableWidgetItem(f"${item['unit_price']:.2f}"))
-            self.table.setItem(row_pos, 4, QTableWidgetItem(f"${item['total']:.2f}"))
+            self.table.setItem(row_pos, 3, QTableWidgetItem(f"₨ {item['unit_price']:.2f}"))
+            self.table.setItem(row_pos, 4, QTableWidgetItem(f"{item['discount']:.2f}%"))
+            self.table.setItem(row_pos, 5, QTableWidgetItem(f"₨ {item['total']:.2f}"))
         self.table.resizeRowsToContents()
     
     def update_totals(self):
-        """Calculates and displays subtotal, discount, and grand total."""
-        subtotal = sum(item['total'] for item in self.invoice_items)
-        
-        try:
-            discount = float(self.discount_input.text()) if self.discount_input.text() else 0.0
-            if discount > subtotal:
-                discount = subtotal
-                self.discount_input.setText(f"{discount:.2f}")
-        except ValueError:
-            discount = 0.0
-            
-        total = max(0, subtotal - discount)
-        
-        self.subtotal_label.setText(f"Subtotal: <b>${subtotal:.2f}</b>")
-        self.total_label.setText(f"Total: <b>${total:.2f}</b>")
+        total = sum(item['total'] for item in self.invoice_items)
+        self.total_label.setText(f"Total: <b>₨ {total:.2f}</b>")
     
+    def get_or_create_customer(self):
+        selection = self.cust_type_combo.currentText()
+        if selection == "Existing Customer":
+            return self.cust_combo.currentData()
+        if selection == "New Customer":
+            name = self.new_cust_name.text().strip()
+            contact = self.new_cust_contact.text().strip()
+            if not name or not contact:
+                QMessageBox.warning(self, "Input Error", "New customer name and contact are required.")
+                return None
+            try:
+                return add_customer(name, contact, "")
+            except Exception as e:
+                QMessageBox.critical(self, "Database Error", f"Failed to add new customer: {e}")
+                return None
+        return None
+
     def save_sales_to_db(self, customer_id):
-        """Records each item as a sale in the database."""
         for item in self.invoice_items:
             success, message = record_sale_with_stock_update(
                 medicine_id=item['id'],
@@ -595,69 +549,47 @@ class InvoiceDialog(QDialog):
                 customer_id=customer_id
             )
             if not success:
-                print(f"Warning: Failed to record sale for {item['name']}: {message}") # This print statement remains for critical DB save warnings
+                print(f"Warning: Failed to record sale for {item['name']}: {message}")
 
     def print_and_record_invoice(self):
-        """Generates printable invoice, records sales, and refreshes data."""
         if not self.invoice_items:
             QMessageBox.warning(self, "Error", "Invoice is empty! Add items before printing.")
             return
-
-        try:
-            discount = float(self.discount_input.text()) if self.discount_input.text() else 0.0
-        except ValueError:
-            discount = 0.0
-
         customer_id = self.get_or_create_customer()
         if self.cust_type_combo.currentText() == "New Customer" and customer_id is None:
             QMessageBox.warning(self, "Customer Error", "Please provide a name and contact for the new customer.")
             return
-
         pharmacy_details = {
             "name": "City Pharmacy",
             "address": "123 Health St, Kāmoke, Pakistan",
             "phone": "+92 300 1234567"
         }
-
         customer_name = "Walk-in Customer"
         if self.cust_type_combo.currentText() == "New Customer":
             customer_name = self.new_cust_name.text()
         elif self.cust_type_combo.currentText() == "Existing Customer" and self.cust_combo.currentData() is not None:
             customer_name = self.cust_combo.currentText().split('(')[0].strip() if self.cust_combo.currentText() else "Unknown"
-
-
         invoice_details = {
             "invoice_number": datetime.datetime.now().strftime("%Y%m%d%H%M%S"),
             "date": datetime.datetime.now().strftime('%d-%b-%Y %I:%M %p'),
             "cashier": self.user.get('full_name', 'N/A'),
             "customer": customer_name
         }
-        
-        subtotal = sum(item['total'] for item in self.invoice_items)
-        total = max(0, subtotal - discount)
-        
+        total = sum(item['total'] for item in self.invoice_items)
         totals = {
-            "subtotal": subtotal,
-            "discount": discount,
             "total": total
         }
-
         html_receipt = generate_receipt_html(pharmacy_details, invoice_details, self.invoice_items, totals)
-
         printer = QPrinter(QPrinter.HighResolution)
         print_dialog = QPrintDialog(printer, self)
-        
         if print_dialog.exec_() == QPrintDialog.Accepted:
             try:
                 doc = QTextDocument()
                 doc.setHtml(html_receipt)
                 doc.print_(printer)
-                
                 self.save_sales_to_db(customer_id)
-                
                 if hasattr(self.parent_window, 'refresh_all'):
                     self.parent_window.refresh_all()
-                    
                 QMessageBox.information(self, "Success", "Invoice printed and sales recorded successfully!")
                 db_signals.sale_recorded.emit()
                 self.accept()

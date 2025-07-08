@@ -1,4 +1,6 @@
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QHBoxLayout, QStatusBar, QMessageBox, QHeaderView, QFileDialog, QPushButton
+from PyQt5.QtWidgets import (
+    QDialog, QVBoxLayout, QLabel, QHBoxLayout, QStatusBar, QMessageBox, QHeaderView, QFileDialog, QPushButton, QLineEdit
+)
 from PyQt5.QtCore import Qt, pyqtSignal
 from widgets.paginated_table import PaginatedTable
 from db import get_all_medicines, delete_medicine, db_signals
@@ -46,6 +48,22 @@ class MedicineManagement(QDialog):
             }
         """)
         main_layout.addWidget(header)
+
+        # Fast Search Bar
+        search_layout = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("🔍 Fast search by name, batch, strength, expiry, etc...")
+        self.search_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px; border: 2px solid #bdc3c7; border-radius: 10px;
+                font-size: 15px; background: white; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+                margin-bottom: 5px;
+            }
+            QLineEdit:focus { border-color: #e74c3c; outline: none; }
+        """)
+        self.search_input.textChanged.connect(self.filter_fast_table)
+        search_layout.addWidget(self.search_input)
+        main_layout.addLayout(search_layout)
 
         # Paginated Table
         self.table = PaginatedTable(self)
@@ -141,8 +159,7 @@ class MedicineManagement(QDialog):
     def load_medicines(self):
         """Load medicines into the paginated table with caching and alerts"""
         try:
-            if not self._cached_medicines:  # Load only if cache is empty
-                self._cached_medicines = get_all_medicines()
+            self._cached_medicines = get_all_medicines()
             if not self._cached_medicines:
                 self.status_bar.showMessage("No medicines found.", 3000)
                 self.table.set_data([])
@@ -164,8 +181,22 @@ class MedicineManagement(QDialog):
             self.table.set_data(data)
             self.status_bar.showMessage(f"Loaded {len(self._cached_medicines)} medicines.", 3000)
             self.medicine_updated.emit()  # Local refresh
+            self.filter_fast_table()
         except Exception as e:
             self.status_bar.showMessage(f"Error loading medicines: {str(e)}", 5000)
+
+    def filter_fast_table(self):
+        """Fast, in-memory, case-insensitive search for 20k+ medicines."""
+        q = self.search_input.text().strip().lower()
+        if not q:
+            self.table.set_data(self._cached_medicines)
+            return
+        keys = ["name", "strength", "batch_no", "expiry_date", "quantity", "unit_price", "alert_status"]
+        filtered = [
+            m for m in self._cached_medicines
+            if any(q in str(m.get(k, "")).lower() for k in keys)
+        ]
+        self.table.set_data(filtered)
 
     def generate_alerts(self):
         """Generate and display alerts for low stock and expiry"""
