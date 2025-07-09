@@ -226,7 +226,7 @@ class Dashboard(QWidget):
     def show_total_details(self):
         headers = ["ID", "Name", "Strength", "Batch No", "Expiry", "Qty", "Unit Price"]
         data = [[m["id"], m["name"], m.get("strength", "N/A"), m.get("batch_no", "N/A"), 
-                 m.get("expiry_date", "N/A"), m.get("quantity", 0), f"${m.get('unit_price', 0):.2f}"] 
+                 m.get("expiry_date", "N/A"), m.get("quantity", 0), f"₨ {m.get('unit_price', 0):.2f}"] 
                 for m in self.medicines]
         dialog = DetailDialog("Inventory Details", data, headers, self, allow_csv=True, csv_default_name="inventory.csv")
         dialog.exec_()
@@ -241,7 +241,7 @@ class Dashboard(QWidget):
     def show_low_stock_details(self):
         headers = ["ID", "Name", "Strength", "Batch No", "Current Qty", "Unit Price"]
         data = [[m["id"], m["name"], m.get("strength", "N/A"), m.get("batch_no", "N/A"), 
-                 m.get("quantity", 0), f"${m.get('unit_price', 0):.2f}"] for m in self.low_stock_meds]
+                 m.get("quantity", 0), f"₨ {m.get('unit_price', 0):.2f}"] for m in self.low_stock_meds]
         dialog = DetailDialog("Low Stock Details", data, headers, self, allow_csv=True, csv_default_name="low_stock.csv")
         dialog.exec_()
 

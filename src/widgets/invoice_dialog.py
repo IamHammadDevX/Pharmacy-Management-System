@@ -1,16 +1,17 @@
 import datetime
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QDoubleValidator, QTextDocument
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QTextDocument
 from PyQt5.QtPrintSupport import QPrinter, QPrintDialog
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QLabel, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QMessageBox,
-    QHeaderView, QFormLayout, QFrame, QSizePolicy, QAbstractItemView
+    QHeaderView, QFormLayout, QFrame, QSizePolicy, QAbstractItemView, QSpacerItem,
+    QApplication, QDialogButtonBox
 )
 from db import get_all_medicines, record_sale_with_stock_update, get_customers, add_customer, db_signals
 
 def is_expired(expiry_date_str):
-    """Returns True if expiry_date_str (format YYYY-MM-DD) is before today."""
+    """Check if expiry_date_str (format YYYY-MM-DD) is before today."""
     try:
         return datetime.datetime.strptime(expiry_date_str, "%Y-%m-%d").date() < datetime.date.today()
     except Exception:
@@ -18,8 +19,8 @@ def is_expired(expiry_date_str):
 
 def generate_receipt_html(pharmacy_details, invoice_details, invoice_items, totals):
     """
-    Generates a short, modern, centralized HTML receipt for thermal/roll printing.
-    Uses Pakistani Rupee symbol (₨ ) for currency.
+    Generate a short, modern, centralized HTML receipt for thermal/roll printing.
+    Uses Pakistani Rupee symbol (₨) for currency.
     """
     html = f"""
     <!DOCTYPE html>
@@ -138,13 +139,197 @@ def generate_receipt_html(pharmacy_details, invoice_details, invoice_items, tota
     """
     return html
 
+class MedicineSearchDialog(QDialog):
+    """Dedicated dialog for searching and selecting medicines."""
+    medicine_selected = pyqtSignal(dict)  # Signal emitted when a medicine is selected
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Search Medicines")
+        self.setMinimumSize(800, 500)
+        
+        self.setStyleSheet("""
+            QDialog { background-color: #f5f7fa; }
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #d1d9e6;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+            QTableWidget {
+                background-color: white;
+                border: 1px solid #e0e3eb;
+                selection-background-color: #e3f2fd;
+                font-size: 13px;
+            }
+            QHeaderView::section {
+                background-color: #f8f9fa;
+                padding: 8px;
+                border: none;
+                font-weight: bold;
+            }
+            QPushButton {
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: 500;
+                border: none;
+            }
+            QPushButton#select_btn {
+                background-color: #4caf50;
+                color: white;
+            }
+            QPushButton#select_btn:hover {
+                background-color: #3d8b40;
+            }
+            QPushButton#cancel_btn {
+                background-color: #f44336;
+                color: white;
+            }
+            QPushButton#cancel_btn:hover {
+                background-color: #d32f2f;
+            }
+        """)
+        
+        layout = QVBoxLayout(self)
+        
+        # Search bar
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search by name, strength, batch, manufacturer...")
+        self.search_input.textChanged.connect(self.filter_medicines)
+        layout.addWidget(self.search_input)
+        
+        # Medicine table
+        self.medicine_table = QTableWidget()
+        self.medicine_table.setColumnCount(8)
+        self.medicine_table.setHorizontalHeaderLabels([
+            "Name", "Generic", "Strength", "Batch", "Manufacturer", "Expiry", "Stock", "Price"
+        ])
+        self.medicine_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.medicine_table.verticalHeader().setVisible(False)
+        self.medicine_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.medicine_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.medicine_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.medicine_table.doubleClicked.connect(self.select_medicine)
+        layout.addWidget(self.medicine_table)
+        
+        # Button box
+        button_box = QDialogButtonBox()
+        self.select_button = QPushButton("Select")
+        self.select_button.setObjectName("select_btn")
+        self.select_button.clicked.connect(self.select_medicine)
+        button_box.addButton(self.select_button, QDialogButtonBox.AcceptRole)
+        
+        cancel_button = QPushButton("Cancel")
+        cancel_button.setObjectName("cancel_btn")
+        cancel_button.clicked.connect(self.reject)
+        button_box.addButton(cancel_button, QDialogButtonBox.RejectRole)
+        layout.addWidget(button_box)
+        
+        self.load_medicines()
+        
+    def load_medicines(self):
+        """Load all medicines from database."""
+        try:
+            self.medicines = get_all_medicines()
+            self.filter_medicines()  # Populate table with all medicines initially
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load medicines: {str(e)}")
+    
+    def filter_medicines(self):
+        """Filter medicines based on search text."""
+        search_text = self.search_input.text().lower()
+        
+        if not self.medicines:
+            return
+            
+        filtered = [
+            med for med in self.medicines 
+            if (search_text in med.get('name', '').lower() or 
+                search_text in med.get('generic_name', '').lower() or
+                search_text in med.get('strength', '').lower() or
+                search_text in med.get('batch_no', '').lower() or
+                search_text in med.get('manufacturer', '').lower())
+        ]
+        
+        self.medicine_table.setRowCount(len(filtered))
+        
+        for row, med in enumerate(filtered):
+            # Set visual appearance based on stock/expiry
+            expired = is_expired(med.get('expiry_date', ''))
+            out_of_stock = med.get('quantity', 0) <= 0
+            
+            # Name
+            name_item = QTableWidgetItem(med.get('name', 'N/A'))
+            if expired or out_of_stock:
+                name_item.setForeground(Qt.red)
+            self.medicine_table.setItem(row, 0, name_item)
+            
+            # Generic
+            self.medicine_table.setItem(row, 1, QTableWidgetItem(med.get('generic_name', '-')))
+            
+            # Strength
+            self.medicine_table.setItem(row, 2, QTableWidgetItem(med.get('strength', '-')))
+            
+            # Batch
+            self.medicine_table.setItem(row, 3, QTableWidgetItem(med.get('batch_no', '-')))
+            
+            # Manufacturer
+            self.medicine_table.setItem(row, 4, QTableWidgetItem(med.get('manufacturer', '-')))
+            
+            # Expiry
+            expiry_item = QTableWidgetItem(self._format_date(med.get('expiry_date', '')))
+            if expired:
+                expiry_item.setForeground(Qt.red)
+                expiry_item.setToolTip("Expired - cannot be sold")
+            self.medicine_table.setItem(row, 5, expiry_item)
+            
+            # Stock
+            stock_item = QTableWidgetItem(str(med.get('quantity', 0)))
+            if out_of_stock:
+                stock_item.setForeground(Qt.red)
+                stock_item.setToolTip("Out of stock")
+            self.medicine_table.setItem(row, 6, stock_item)
+            
+            # Price
+            self.medicine_table.setItem(row, 7, QTableWidgetItem(f"₨ {med.get('unit_price', 0):.2f}"))
+        
+        # Resize columns to fit content
+        self.medicine_table.resizeColumnsToContents()
+        
+    def _format_date(self, date_str):
+        """Format date for display."""
+        if not date_str:
+            return "-"
+        try:
+            date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+            return date.strftime("%d-%b-%Y")
+        except ValueError:
+            return date_str
+            
+    def select_medicine(self):
+        """Handle medicine selection."""
+        selected_row = self.medicine_table.currentRow()
+        if selected_row >= 0:
+            search_text = self.search_input.text().lower()
+            filtered = [
+                med for med in self.medicines 
+                if (search_text in med.get('name', '').lower() or 
+                    search_text in med.get('generic_name', '').lower() or
+                    search_text in med.get('strength', '').lower() or
+                    search_text in med.get('batch_no', '').lower() or
+                    search_text in med.get('manufacturer', '').lower())
+            ]
+            if selected_row < len(filtered):
+                self.medicine_selected.emit(filtered[selected_row])
+                self.accept()
+
 class InvoiceDialog(QDialog):
     def __init__(self, user, parent=None):
         super().__init__(parent)
         self.user = user
         self.parent_window = parent
         self.setWindowTitle("Create Invoice")
-        self.setMinimumSize(1000, 650) 
+        self.setMinimumSize(1300, 650)  # Increased width for better layout
 
         self.setStyleSheet("""
             QDialog { background-color: #f0f2f5; }
@@ -152,13 +337,19 @@ class InvoiceDialog(QDialog):
                 background-color: #ffffff;
                 border-radius: 8px;
                 border: 1px solid #e0e0e0;
-                max-width: 320px;
             }
             QFrame#card {
                 background-color: #f8f9fa;
                 border-radius: 8px;
                 border: 1px solid #e9ecef;
                 padding: 15px;
+            }
+            QFrame#table_container {
+                background-color: #ffffff;
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
+                padding: 10px;
+                margin-bottom: 15px;
             }
             QLabel { font-size: 14px; color: #34495e; }
             QLabel#header_label {
@@ -180,13 +371,24 @@ class InvoiceDialog(QDialog):
                 background-color: #28a745; padding: 12px 25px; font-size: 15px;
             }
             QPushButton#print_invoice_btn:hover { background-color: #218838; }
+            QPushButton#search_btn {
+                background-color: #6c757d;
+                padding: 8px 15px;
+                font-size: 13px;
+            }
+            QPushButton#search_btn:hover {
+                background-color: #5a6268;
+            }
             QTableWidget {
                 background-color: white;
-                border: 1px solid #e0e0e0;
-                border-radius: 8px;
+                border: none;
                 selection-background-color: #e0eafc;
                 gridline-color: #f0f0f0;
                 font-size: 13px;
+                alternate-background-color: #f8f9fa;  # Zebra striping
+            }
+            QTableWidget::item {
+                padding: 4px;
             }
             QHeaderView::section {
                 background-color: #f8f9fa;
@@ -208,42 +410,62 @@ class InvoiceDialog(QDialog):
         main_layout.setContentsMargins(15, 15, 15, 15)
         main_layout.setSpacing(15)
 
+        # Left sidebar
         left_sidebar = QFrame()
         left_sidebar.setObjectName("left_sidebar")
         sidebar_layout = QVBoxLayout(left_sidebar)
         sidebar_layout.setContentsMargins(15, 15, 15, 15)
-        sidebar_layout.setSpacing(20)
+        sidebar_layout.setSpacing(15)
 
+        # Add item card
         add_item_card = QFrame()
         add_item_card.setObjectName("card")
         add_item_layout = QVBoxLayout(add_item_card)
-        add_item_layout.setSpacing(8)
-        add_item_layout.addWidget(QLabel("<b>Search & Add Medicine</b>"))
+        add_item_layout.setSpacing(10)
+        add_item_layout.addWidget(QLabel("<b>Add Medicine to Invoice</b>"))
 
-        self.medicine_search = QLineEdit()
-        self.medicine_search.setPlaceholderText("Search by name, strength, batch...")
-        self.medicine_search.textChanged.connect(self.filter_medicine_table)
-        add_item_layout.addWidget(self.medicine_search)
+        # Search button row
+        search_btn_row = QHBoxLayout()
+        self.search_btn = QPushButton("🔍 Search Medicines...")
+        self.search_btn.setObjectName("search_btn")
+        self.search_btn.setCursor(Qt.PointingHandCursor)
+        self.search_btn.clicked.connect(self.show_search_dialog)
+        search_btn_row.addWidget(self.search_btn)
+        add_item_layout.addLayout(search_btn_row)
 
-        self.medicine_table = QTableWidget(0, 6)
-        self.medicine_table.setHorizontalHeaderLabels([
-            "Name", "Strength", "Batch", "Expiry", "Stock", "Price"
-        ])
-        self.medicine_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.medicine_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.medicine_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.medicine_table.setMinimumHeight(220)
-        self.medicine_table.setMaximumHeight(220)
-        self.medicine_table.doubleClicked.connect(self.select_medicine_from_table)
-        add_item_layout.addWidget(self.medicine_table)
+        # Selected medicine info
+        self.selected_med_frame = QFrame()
+        self.selected_med_frame.setVisible(False)
+        selected_med_layout = QVBoxLayout(self.selected_med_frame)
+        selected_med_layout.setContentsMargins(0, 10, 0, 0)
+        
+        self.med_name_label = QLabel()
+        self.med_name_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        selected_med_layout.addWidget(self.med_name_label)
+        
+        med_details_layout = QHBoxLayout()
+        self.med_batch_label = QLabel()
+        self.med_batch_label.setStyleSheet("color: #555; font-size: 12px;")
+        med_details_layout.addWidget(self.med_batch_label)
+        
+        self.med_expiry_label = QLabel()
+        self.med_expiry_label.setStyleSheet("color: #555; font-size: 12px;")
+        med_details_layout.addWidget(self.med_expiry_label)
+        
+        self.med_stock_label = QLabel()
+        self.med_stock_label.setStyleSheet("color: #555; font-size: 12px;")
+        med_details_layout.addWidget(self.med_stock_label)
+        med_details_layout.addStretch()
+        selected_med_layout.addLayout(med_details_layout)
+        
+        add_item_layout.addWidget(self.selected_med_frame)
 
-        # --- Improved Quantity & Discount Layout ---
+        # Quantity & Discount layout
         qty_disc_widget = QFrame()
         qty_disc_layout = QHBoxLayout(qty_disc_widget)
         qty_disc_layout.setSpacing(18)
         qty_disc_layout.setContentsMargins(0, 6, 0, 6)
 
-        # Quantity section
         qty_vbox = QVBoxLayout()
         qty_label = QLabel("Quantity")
         qty_label.setStyleSheet("font-weight: bold; font-size: 13px; padding-bottom: 2px; color: #223b61;")
@@ -255,7 +477,6 @@ class InvoiceDialog(QDialog):
         qty_vbox.addWidget(self.quantity_spin)
         qty_disc_layout.addLayout(qty_vbox)
 
-        # Discount section
         disc_vbox = QVBoxLayout()
         disc_label = QLabel("Discount")
         disc_label.setStyleSheet("font-weight: bold; font-size: 13px; padding-bottom: 2px; color: #223b61;")
@@ -278,6 +499,7 @@ class InvoiceDialog(QDialog):
         add_item_layout.addWidget(btn_add)
         sidebar_layout.addWidget(add_item_card)
 
+        # Customer card
         customer_card = QFrame()
         customer_card.setObjectName("card")
         customer_layout = QFormLayout(customer_card)
@@ -298,8 +520,9 @@ class InvoiceDialog(QDialog):
         sidebar_layout.addWidget(customer_card)
         sidebar_layout.addStretch()
 
-        main_layout.addWidget(left_sidebar)
+        main_layout.addWidget(left_sidebar, stretch=1)
 
+        # Right panel
         right_panel = QFrame()
         right_panel_layout = QVBoxLayout(right_panel)
         right_panel_layout.setContentsMargins(0, 0, 0, 0)
@@ -312,7 +535,7 @@ class InvoiceDialog(QDialog):
         self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(["Medicine", "Strength", "Qty", "Unit Price", "Discount", "Total"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         right_panel_layout.addWidget(self.table)
@@ -341,40 +564,76 @@ class InvoiceDialog(QDialog):
         btn_print = QPushButton("🖨️ Complete & Print")
         btn_print.setObjectName("print_invoice_btn")
         btn_print.setCursor(Qt.PointingHandCursor)
+        btn_print.clicked.connect(self.print_and_record_invoice)
         print_btn_layout.addWidget(btn_print)
         print_btn_layout.addStretch()
         bottom_layout.addLayout(print_btn_layout)
         right_panel_layout.addLayout(bottom_layout)
-        main_layout.addWidget(right_panel)
+
+        main_layout.addWidget(right_panel, stretch=1)
 
         self.setLayout(main_layout)
         self.invoice_items = []
-        self.all_medicine_rows = []
-        self.load_medicines()
+        self.selected_medicine = None
         self.load_customers()
         self.toggle_customer_fields()
         self.update_totals()
 
-        btn_print.clicked.connect(self.print_and_record_invoice)
-        db_signals.medicine_updated.connect(self.load_medicines)
-        db_signals.sale_recorded.connect(self.load_medicines)
+        # db_signals.medicine_updated.connect(self.load_medicines)
+        # db_signals.sale_recorded.connect(self.load_medicines)
 
-    def load_medicines(self):
-        self.all_medicine_rows = []
-        self.medicine_table.setRowCount(0)
+    def show_search_dialog(self):
+        """Show the medicine search dialog."""
+        dialog = MedicineSearchDialog(self)
+        dialog.medicine_selected.connect(self.set_selected_medicine)
+        dialog.exec_()
+
+    def set_selected_medicine(self, medicine):
+        """Set the selected medicine from search dialog."""
+        self.selected_medicine = medicine
+        self.selected_med_frame.setVisible(True)
+        
+        # Update UI with selected medicine info
+        self.med_name_label.setText(medicine.get('name', 'N/A'))
+        
+        batch_text = f"Batch: {medicine.get('batch_no', '-')}"
+        self.med_batch_label.setText(batch_text)
+        
+        expiry_date = medicine.get('expiry_date', '')
+        expiry_text = "Expiry: " + self._format_date(expiry_date)
+        self.med_expiry_label.setText(expiry_text)
+        
+        stock = medicine.get('quantity', 0)
+        stock_text = f"Stock: {stock}"
+        self.med_stock_label.setText(stock_text)
+        
+        # Set quantity limits
+        self.quantity_spin.setMaximum(stock if stock > 0 else 9999)
+        self.quantity_spin.setValue(1)
+        
+        # Set visual cues for expiry/stock
+        if is_expired(expiry_date):
+            self.med_expiry_label.setStyleSheet("color: red; font-size: 12px;")
+        else:
+            self.med_expiry_label.setStyleSheet("color: #555; font-size: 12px;")
+            
+        if stock <= 0:
+            self.med_stock_label.setStyleSheet("color: red; font-size: 12px;")
+        else:
+            self.med_stock_label.setStyleSheet("color: #555; font-size: 12px;")
+
+    def _format_date(self, date_str):
+        """Format date for display."""
+        if not date_str:
+            return "-"
         try:
-            all_meds = get_all_medicines()
-            for med in all_meds:
-                row = [
-                    med['name'], med['strength'], med['batch_no'],
-                    med['expiry_date'], str(med['quantity']), f"₨ {med['unit_price']:.2f}"
-                ]
-                self.all_medicine_rows.append((row, med))
-            self.filter_medicine_table()
-        except Exception as e:
-            QMessageBox.critical(self, "Database Error", f"Could not load medicines: {e}")
+            date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+            return date.strftime("%d-%b-%Y")
+        except ValueError:
+            return date_str
 
     def load_customers(self):
+        """Load customers from the database into the customer combo box."""
         self.cust_combo.clear()
         self.cust_combo.addItem("Select Customer...", None)
         try:
@@ -385,6 +644,7 @@ class InvoiceDialog(QDialog):
             QMessageBox.critical(self, "Database Error", f"Could not load customers: {e}")
 
     def toggle_customer_fields(self):
+        """Toggle visibility of customer fields based on customer type selection."""
         selection = self.cust_type_combo.currentText()
         is_existing = selection == "Existing Customer"
         is_new = selection == "New Customer"
@@ -401,66 +661,13 @@ class InvoiceDialog(QDialog):
         if label_for_new_contact:
             label_for_new_contact.setVisible(is_new)
 
-    def filter_medicine_table(self):
-        search = self.medicine_search.text().lower()
-        self.medicine_table.setRowCount(0)
-        for row_data, med in self.all_medicine_rows:
-            expired = is_expired(med.get("expiry_date", "2099-01-01"))
-            if (
-                search in row_data[0].lower() or
-                search in row_data[1].lower() or
-                search in row_data[2].lower()
-            ):
-                row_pos = self.medicine_table.rowCount()
-                self.medicine_table.insertRow(row_pos)
-                for col, value in enumerate(row_data):
-                    item = QTableWidgetItem(value)
-                    if expired:
-                        item.setForeground(Qt.red)
-                        item.setToolTip("Expired - cannot be purchased")
-                    elif col == 4 and int(med['quantity']) == 0:
-                        item.setForeground(Qt.red)
-                    self.medicine_table.setItem(row_pos, col, item)
-                self.medicine_table.setRowHeight(row_pos, 24)
-        self.medicine_table.clearSelection()
-
-    def select_medicine_from_table(self, idx):
-        row = idx.row()
-        if row < 0:
-            return
-        name = self.medicine_table.item(row, 0).text()
-        strength = self.medicine_table.item(row, 1).text()
-        batch = self.medicine_table.item(row, 2).text()
-        med = next(
-            (med for (row_data, med) in self.all_medicine_rows
-             if row_data[0] == name and row_data[1] == strength and row_data[2] == batch),
-            None
-        )
-        if med:
-            self.quantity_spin.setMaximum(med['quantity'] if med['quantity'] > 0 else 9999)
-            self.quantity_spin.setValue(1)
-            self.discount_spin.setValue(0.0)
-            self.selected_medicine = med
-
     def add_item(self):
-        selected_rows = self.medicine_table.selectionModel().selectedRows()
-        if not selected_rows:
-            QMessageBox.warning(self, "Input Error", "Please select a medicine from the table.")
-            return
-        row = selected_rows[0].row()
-        name = self.medicine_table.item(row, 0).text()
-        strength = self.medicine_table.item(row, 1).text()
-        batch = self.medicine_table.item(row, 2).text()
-        med = next(
-            (med for (row_data, med) in self.all_medicine_rows
-             if row_data[0] == name and row_data[1] == strength and row_data[2] == batch),
-            None
-        )
-        if not med:
-            QMessageBox.warning(self, "Input Error", "Medicine not found. Please refresh and try again.")
+        """Add a selected medicine to the invoice items."""
+        if not self.selected_medicine:
+            QMessageBox.warning(self, "Selection Error", "Please select a medicine first.")
             return
 
-        # BLOCK EXPIRED
+        med = self.selected_medicine
         if is_expired(med.get("expiry_date", "2099-01-01")):
             QMessageBox.warning(self, "Expired Medicine", f"{med['name']} is expired and cannot be sold.")
             return
@@ -470,6 +677,7 @@ class InvoiceDialog(QDialog):
         if qty <= 0:
             return
 
+        # Check if medicine already exists in invoice
         for item in self.invoice_items:
             if item['id'] == med['id']:
                 new_qty = item['qty'] + qty
@@ -477,7 +685,7 @@ class InvoiceDialog(QDialog):
                     QMessageBox.warning(self, "Stock Error", f"Not enough stock for {med['name']}. Available: {med['quantity']}.")
                     return
                 item['qty'] = new_qty
-                item['discount'] = discount  # Update discount for this line!
+                item['discount'] = discount
                 item['total'] = new_qty * med['unit_price'] * (1 - discount / 100)
                 break
         else:
@@ -485,20 +693,28 @@ class InvoiceDialog(QDialog):
                 QMessageBox.warning(self, "Stock Error", f"Not enough stock for {med['name']}. Available: {med['quantity']}.")
                 return
             self.invoice_items.append({
-                'id': med['id'], 'name': med['name'], 'strength': med['strength'],
+                'id': med['id'], 
+                'name': med['name'], 
+                'strength': med['strength'],
                 'qty': qty,
                 'unit_price': med['unit_price'],
                 'discount': discount,
                 'total': qty * med['unit_price'] * (1 - discount / 100)
             })
+            
         self.update_table()
         self.update_totals()
-        self.medicine_table.clearSelection()
-        self.medicine_search.clear()
+        self.clear_selection()
+
+    def clear_selection(self):
+        """Clear the current medicine selection."""
+        self.selected_medicine = None
+        self.selected_med_frame.setVisible(False)
         self.quantity_spin.setValue(1)
         self.discount_spin.setValue(0.0)
 
     def remove_item(self):
+        """Remove a selected item from the invoice table."""
         selected_row = self.table.currentRow()
         if selected_row < 0:
             QMessageBox.warning(self, "Selection Error", "Please select an item to remove.")
@@ -506,8 +722,9 @@ class InvoiceDialog(QDialog):
         del self.invoice_items[selected_row]
         self.update_table()
         self.update_totals()
-    
+
     def update_table(self):
+        """Update the invoice table with current items."""
         self.table.setRowCount(0)
         for item in self.invoice_items:
             row_pos = self.table.rowCount()
@@ -519,12 +736,14 @@ class InvoiceDialog(QDialog):
             self.table.setItem(row_pos, 4, QTableWidgetItem(f"{item['discount']:.2f}%"))
             self.table.setItem(row_pos, 5, QTableWidgetItem(f"₨ {item['total']:.2f}"))
         self.table.resizeRowsToContents()
-    
+
     def update_totals(self):
+        """Update the total amount displayed in the invoice."""
         total = sum(item['total'] for item in self.invoice_items)
         self.total_label.setText(f"Total: <b>₨ {total:.2f}</b>")
-    
+
     def get_or_create_customer(self):
+        """Get or create a customer ID based on the selected customer type."""
         selection = self.cust_type_combo.currentText()
         if selection == "Existing Customer":
             return self.cust_combo.currentData()
@@ -542,6 +761,7 @@ class InvoiceDialog(QDialog):
         return None
 
     def save_sales_to_db(self, customer_id):
+        """Save invoice items to the database."""
         for item in self.invoice_items:
             success, message = record_sale_with_stock_update(
                 medicine_id=item['id'],
@@ -552,6 +772,7 @@ class InvoiceDialog(QDialog):
                 print(f"Warning: Failed to record sale for {item['name']}: {message}")
 
     def print_and_record_invoice(self):
+        """Print the invoice and record sales in the database."""
         if not self.invoice_items:
             QMessageBox.warning(self, "Error", "Invoice is empty! Add items before printing.")
             return

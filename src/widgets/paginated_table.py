@@ -123,7 +123,7 @@ class PaginatedTable(QWidget):
                 self.table.setItem(row, 2, QTableWidgetItem(str(med.get("batch_no", ""))))
                 self.table.setItem(row, 3, QTableWidgetItem(str(med.get("expiry_date", ""))))
                 self.table.setItem(row, 4, QTableWidgetItem(str(med.get("quantity", ""))))
-                self.table.setItem(row, 5, QTableWidgetItem("₨{}".format(med.get("unit_price", ""))))
+                self.table.setItem(row, 5, QTableWidgetItem("₨ {}".format(med.get("unit_price", ""))))
 
                 low_stock = False
                 expiry_soon = False

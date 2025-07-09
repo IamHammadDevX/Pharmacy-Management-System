@@ -17,7 +17,7 @@ class SaleDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Record New Sale")
-        self.setMinimumSize(530, 600)
+        self.setMinimumSize(1000, 650)
 
         self.setStyleSheet("""
             QDialog {
@@ -80,6 +80,12 @@ class SaleDialog(QDialog):
             QPushButton#record_sale_btn:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #218838, stop:1 #28a745);
             }
+            QPushButton#prev_btn, QPushButton#next_btn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6c757d, stop:1 #5a6268);
+            }
+            QPushButton#prev_btn:hover, QPushButton#next_btn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #5a6268, stop:1 #6c757d);
+            }
         """)
 
         main_layout = QVBoxLayout(self)
@@ -109,6 +115,26 @@ class SaleDialog(QDialog):
         self.medicine_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.medicine_table.setMinimumHeight(170)
         form_layout.addRow(self.medicine_table)
+
+        # Pagination Controls
+        self.current_page = 0
+        self.items_per_page = 100
+        pagination_layout = QHBoxLayout()
+        pagination_layout.addStretch()
+        self.prev_btn = QPushButton("Previous")
+        self.prev_btn.setObjectName("prev_btn")
+        self.prev_btn.setCursor(Qt.PointingHandCursor)
+        self.prev_btn.clicked.connect(self.prev_page)
+        pagination_layout.addWidget(self.prev_btn)
+        self.page_label = QLabel("Page 1")
+        pagination_layout.addWidget(self.page_label)
+        self.next_btn = QPushButton("Next")
+        self.next_btn.setObjectName("next_btn")
+        self.next_btn.setCursor(Qt.PointingHandCursor)
+        self.next_btn.clicked.connect(self.next_page)
+        pagination_layout.addWidget(self.next_btn)
+        pagination_layout.addStretch()
+        form_layout.addRow(pagination_layout)
 
         # Quantity Input
         self.qty_spin = QSpinBox()
@@ -173,7 +199,7 @@ class SaleDialog(QDialog):
 
     def fast_filter_medicine_table(self):
         search = self.medicine_search.text().strip().lower()
-        self.medicine_table.setRowCount(0)
+        filtered_meds = []
         for med in self.medicines:
             # Don't show expired medicines in the sale dialog
             if is_expired(med.get("expiry_date", "2099-01-01")):
@@ -185,16 +211,51 @@ class SaleDialog(QDialog):
                 search in str(med.get('expiry_date', '')).lower()
             ) if search else True
             if display:
-                row_pos = self.medicine_table.rowCount()
-                self.medicine_table.insertRow(row_pos)
-                self.medicine_table.setItem(row_pos, 0, QTableWidgetItem(med['name']))
-                self.medicine_table.setItem(row_pos, 1, QTableWidgetItem(str(med.get('strength', ''))))
-                self.medicine_table.setItem(row_pos, 2, QTableWidgetItem(str(med.get('batch_no', ''))))
-                self.medicine_table.setItem(row_pos, 3, QTableWidgetItem(str(med.get('expiry_date', ''))))
-                self.medicine_table.setItem(row_pos, 4, QTableWidgetItem(str(med.get('quantity', ''))))
-                self.medicine_table.setItem(row_pos, 5, QTableWidgetItem("₨{:.2f}".format(med.get('unit_price', 0))))
+                filtered_meds.append(med)
+        
+        # Calculate pagination
+        total_items = len(filtered_meds)
+        total_pages = (total_items + self.items_per_page - 1) // self.items_per_page
+        self.current_page = min(self.current_page, max(0, total_pages - 1))
+        start_idx = self.current_page * self.items_per_page
+        end_idx = min(start_idx + self.items_per_page, total_items)
+        
+        # Update table with paginated items
+        self.medicine_table.setRowCount(0)
+        for med in filtered_meds[start_idx:end_idx]:
+            row_pos = self.medicine_table.rowCount()
+            self.medicine_table.insertRow(row_pos)
+            self.medicine_table.setItem(row_pos, 0, QTableWidgetItem(med['name']))
+            self.medicine_table.setItem(row_pos, 1, QTableWidgetItem(str(med.get('strength', ''))))
+            self.medicine_table.setItem(row_pos, 2, QTableWidgetItem(str(med.get('batch_no', ''))))
+            self.medicine_table.setItem(row_pos, 3, QTableWidgetItem(str(med.get('expiry_date', ''))))
+            self.medicine_table.setItem(row_pos, 4, QTableWidgetItem(str(med.get('quantity', ''))))
+            self.medicine_table.setItem(row_pos, 5, QTableWidgetItem("₨ {:.2f}".format(med.get('unit_price', 0))))
+        
+        # Update pagination controls
+        self.page_label.setText(f"Page {self.current_page + 1} of {max(1, total_pages)}")
+        self.prev_btn.setEnabled(self.current_page > 0)
+        self.next_btn.setEnabled(self.current_page < total_pages - 1)
         self.medicine_table.clearSelection()
         self.selected_medicine = None
+
+    def prev_page(self):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.fast_filter_medicine_table()
+
+    def next_page(self):
+        search = self.medicine_search.text().strip().lower()
+        filtered_meds = [med for med in self.medicines if not is_expired(med.get("expiry_date", "2099-01-01")) and (
+            search in med['name'].lower() or
+            search in str(med.get('strength', '')).lower() or
+            search in str(med.get('batch_no', '')).lower() or
+            search in str(med.get('expiry_date', '')).lower()
+        )] if search else [med for med in self.medicines if not is_expired(med.get("expiry_date", "2099-01-01"))]
+        total_pages = (len(filtered_meds) + self.items_per_page - 1) // self.items_per_page
+        if self.current_page < total_pages - 1:
+            self.current_page += 1
+            self.fast_filter_medicine_table()
 
     def load_customers(self):
         self.cust_combo.clear()
@@ -244,7 +305,7 @@ class SaleDialog(QDialog):
             if customer_id is None:
                 return  # Error already shown
 
-            # Perform atomic operation - quantity updated within record_sale_with_stock_update
+            # Perform atomic operation
             success, message = db.record_sale_with_stock_update(
                 medicine_id=med["id"],
                 quantity=qty,
@@ -282,12 +343,11 @@ class SaleDialog(QDialog):
             QMessageBox.critical(self, "Database Error", f"Failed to add new customer: {str(e)}")
             return None
 
-
 class PurchaseDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Record New Purchase")
-        self.setMinimumSize(530, 600)
+        self.setMinimumSize(1000, 650)
 
         self.setStyleSheet("""
             QDialog {
@@ -350,6 +410,12 @@ class PurchaseDialog(QDialog):
             QPushButton#record_purchase_btn:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0056b3, stop:1 #007bff);
             }
+            QPushButton#prev_btn, QPushButton#next_btn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6c757d, stop:1 #5a6268);
+            }
+            QPushButton#prev_btn:hover, QPushButton#next_btn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #5a6268, stop:1 #6c757d);
+            }
         """)
 
         main_layout = QVBoxLayout(self)
@@ -380,6 +446,26 @@ class PurchaseDialog(QDialog):
         self.medicine_table.setMinimumHeight(170)
         form_layout.addRow(self.medicine_table)
 
+        # Pagination Controls
+        self.current_page = 0
+        self.items_per_page = 100
+        pagination_layout = QHBoxLayout()
+        pagination_layout.addStretch()
+        self.prev_btn = QPushButton("Previous")
+        self.prev_btn.setObjectName("prev_btn")
+        self.prev_btn.setCursor(Qt.PointingHandCursor)
+        self.prev_btn.clicked.connect(self.prev_page)
+        pagination_layout.addWidget(self.prev_btn)
+        self.page_label = QLabel("Page 1")
+        pagination_layout.addWidget(self.page_label)
+        self.next_btn = QPushButton("Next")
+        self.next_btn.setObjectName("next_btn")
+        self.next_btn.setCursor(Qt.PointingHandCursor)
+        self.next_btn.clicked.connect(self.next_page)
+        pagination_layout.addWidget(self.next_btn)
+        pagination_layout.addStretch()
+        form_layout.addRow(pagination_layout)
+
         # Quantity Input
         self.qty_spin = QSpinBox()
         self.qty_spin.setMinimum(1)
@@ -388,7 +474,7 @@ class PurchaseDialog(QDialog):
 
         # Price Input
         self.price_edit = QLineEdit()
-        self.price_edit.setPlaceholderText("Unit price (₨)")
+        self.price_edit.setPlaceholderText("Unit price (₨ )")
         form_layout.addRow("Unit Price:", self.price_edit)
 
         main_layout.addLayout(form_layout)
@@ -448,9 +534,8 @@ class PurchaseDialog(QDialog):
 
     def fast_filter_medicine_table(self):
         search = self.medicine_search.text().strip().lower()
-        self.medicine_table.setRowCount(0)
+        filtered_meds = []
         for med in self.medicines:
-            # Outgoing purchase: show expired, but highlight
             display = (
                 search in med['name'].lower() or
                 search in str(med.get('strength', '')).lower() or
@@ -458,19 +543,54 @@ class PurchaseDialog(QDialog):
                 search in str(med.get('expiry_date', '')).lower()
             ) if search else True
             if display:
-                row_pos = self.medicine_table.rowCount()
-                self.medicine_table.insertRow(row_pos)
-                for col, key in enumerate(['name', 'strength', 'batch_no', 'expiry_date', 'quantity', 'unit_price']):
-                    value = med.get(key, '')
-                    if col == 5:
-                        value = "₨{:.2f}".format(med.get('unit_price', 0))
-                    item = QTableWidgetItem(str(value))
-                    if is_expired(med.get("expiry_date", "2099-01-01")):
-                        item.setForeground(Qt.red)
-                        item.setToolTip("Expired medicine - check expiry!")
-                    self.medicine_table.setItem(row_pos, col, item)
+                filtered_meds.append(med)
+        
+        # Calculate pagination
+        total_items = len(filtered_meds)
+        total_pages = (total_items + self.items_per_page - 1) // self.items_per_page
+        self.current_page = min(self.current_page, max(0, total_pages - 1))
+        start_idx = self.current_page * self.items_per_page
+        end_idx = min(start_idx + self.items_per_page, total_items)
+        
+        # Update table with paginated items
+        self.medicine_table.setRowCount(0)
+        for med in filtered_meds[start_idx:end_idx]:
+            row_pos = self.medicine_table.rowCount()
+            self.medicine_table.insertRow(row_pos)
+            for col, key in enumerate(['name', 'strength', 'batch_no', 'expiry_date', 'quantity', 'unit_price']):
+                value = med.get(key, '')
+                if col == 5:
+                    value = "₨ {:.2f}".format(med.get('unit_price', 0))
+                item = QTableWidgetItem(str(value))
+                if is_expired(med.get("expiry_date", "2099-01-01")):
+                    item.setForeground(Qt.red)
+                    item.setToolTip("Expired medicine - check expiry!")
+                self.medicine_table.setItem(row_pos, col, item)
+        
+        # Update pagination controls
+        self.page_label.setText(f"Page {self.current_page + 1} of {max(1, total_pages)}")
+        self.prev_btn.setEnabled(self.current_page > 0)
+        self.next_btn.setEnabled(self.current_page < total_pages - 1)
         self.medicine_table.clearSelection()
         self.selected_medicine = None
+
+    def prev_page(self):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.fast_filter_medicine_table()
+
+    def next_page(self):
+        search = self.medicine_search.text().strip().lower()
+        filtered_meds = [med for med in self.medicines if (
+            search in med['name'].lower() or
+            search in str(med.get('strength', '')).lower() or
+            search in str(med.get('batch_no', '')).lower() or
+            search in str(med.get('expiry_date', '')).lower()
+        )] if search else self.medicines
+        total_pages = (len(filtered_meds) + self.items_per_page - 1) // self.items_per_page
+        if self.current_page < total_pages - 1:
+            self.current_page += 1
+            self.fast_filter_medicine_table()
 
     def load_suppliers(self):
         self.supp_combo.clear()
